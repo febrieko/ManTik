@@ -475,7 +475,7 @@
                             name="email"
                             value="{{ old('email') }}"
                             class="form-input"
-                            placeholder="admin@mantik.test"
+                            placeholder="nama@domain.com"
                             required
                             autofocus
                             autocomplete="email"
@@ -531,23 +531,6 @@
                     Masuk ke Dashboard
                 </button>
             </form>
-
-            {{-- Demo Credentials --}}
-            <div class="demo-creds">
-                <div class="demo-creds-title">🔑 Akun Demo</div>
-                <div class="demo-cred-row" onclick="fillLogin('superadmin@mantik.test', 'password')">
-                    <span>Super Admin</span>
-                    <span>superadmin@mantik.test</span>
-                </div>
-                <div class="demo-cred-row" onclick="fillLogin('admin@mantik.test', 'password')">
-                    <span>Admin</span>
-                    <span>admin@mantik.test</span>
-                </div>
-                <div class="demo-cred-row" onclick="fillLogin('teknisi@mantik.test', 'password')">
-                    <span>Teknisi</span>
-                    <span>teknisi@mantik.test</span>
-                </div>
-            </div>
         </div>
 
         {{-- Footer --}}
@@ -568,13 +551,6 @@
                 input.type = 'password';
                 icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
             }
-        }
-
-        // Fill demo credentials
-        function fillLogin(email, password) {
-            document.getElementById('email').value = email;
-            document.getElementById('password').value = password;
-            document.getElementById('email').focus();
         }
 
         // Loading state on submit

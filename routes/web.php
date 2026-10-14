@@ -145,11 +145,18 @@ Route::middleware(['auth'])->group(function () {
     // ============================================
     Route::middleware(['can:view users'])->group(function () {
         Route::resource('users', UserController::class);
+        Route::put('/users/{user}/password', [UserController::class, 'updatePassword'])->name('users.update-password');
         
         Route::get('/users/{user}/router-assignments', [\App\Http\Controllers\UserRouterAssignmentController::class, 'index'])->name('users.router-assignments');
         Route::post('/users/{user}/router-assignments', [\App\Http\Controllers\UserRouterAssignmentController::class, 'assign'])->name('users.router-assignments.assign');
         Route::delete('/users/{user}/router-assignments/{router}', [\App\Http\Controllers\UserRouterAssignmentController::class, 'revoke'])->name('users.router-assignments.revoke');
     });
+
+    // ============================================
+    // USER PROFILE & PASSWORD
+    // ============================================
+    Route::get('/profile/password', [UserController::class, 'showChangePasswordForm'])->name('profile.password');
+    Route::put('/profile/password', [UserController::class, 'changeOwnPassword'])->name('profile.password.update');
 
     // ============================================
     // PACKAGES / PROFILES

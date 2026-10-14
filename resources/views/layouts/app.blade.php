@@ -318,11 +318,18 @@
                     </div>
                     
                     {{-- Dropdown Menu --}}
-                    <div id="userDropdownMenu" class="user-dropdown" style="display: none; position: absolute; right: 0; top: 120%; background: var(--bg-primary, #ffffff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 0.5rem; padding: 0.5rem; min-width: 150px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); z-index: 50;">
+                    <div id="userDropdownMenu" class="user-dropdown" style="display: none; position: absolute; right: 0; top: 120%; background: var(--bg-secondary, #0d1424); border: 1px solid var(--border); border-radius: 8px; padding: 6px; min-width: 170px; box-shadow: var(--shadow-card); z-index: 50;">
+                        <a href="{{ route('profile.password') }}" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: var(--text-primary); text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; transition: var(--transition);" onmouseover="this.style.background='var(--bg-card-hover)'" onmouseout="this.style.background='transparent'">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: #ffb300;">
+                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/>
+                            </svg>
+                            Ubah Password
+                        </a>
+                        <div style="height: 1px; background: var(--border); margin: 4px 0;"></div>
                         <form action="{{ route('logout') }}" method="POST" style="margin: 0;">
                             @csrf
-                            <button type="submit" style="display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; width: 100%; border: none; background: transparent; color: #ef4444; cursor: pointer; border-radius: 0.375rem; font-size: 0.875rem; font-weight: 500;">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <button type="submit" style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; width: 100%; border: none; background: transparent; color: #ff5252; cursor: pointer; border-radius: 6px; font-size: 13px; font-weight: 500; transition: var(--transition);" onmouseover="this.style.background='rgba(255,82,82,0.1)'" onmouseout="this.style.background='transparent'">
+                                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/>
                                 </svg>
                                 Logout

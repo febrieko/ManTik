@@ -199,7 +199,9 @@ Route::middleware(['auth'])->group(function () {
     // ============================================
     Route::prefix('telegram')->name('telegram.')->group(function () {
         Route::get('/settings', [\App\Http\Controllers\TelegramAdminController::class, 'settings'])->name('settings');
+        Route::post('/settings', [\App\Http\Controllers\TelegramAdminController::class, 'updateSettings'])->name('settings.update');
         Route::post('/settings/webhook', [\App\Http\Controllers\TelegramAdminController::class, 'setWebhook'])->name('set-webhook');
+        Route::post('/settings/test', [\App\Http\Controllers\TelegramAdminController::class, 'testSend'])->name('test-send');
         Route::get('/users', [\App\Http\Controllers\TelegramAdminController::class, 'users'])->name('users');
         Route::post('/users/{user}/topup', [\App\Http\Controllers\TelegramAdminController::class, 'topup'])->name('users.topup');
         Route::get('/requests', [\App\Http\Controllers\TelegramAdminController::class, 'requests'])->name('requests');

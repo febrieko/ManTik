@@ -97,7 +97,7 @@ class NotificationController extends Controller
         // 4. Gateway Integration Health Status
         $gateways = [
             'whatsapp_configured' => !empty(config('whatsapp.api_url')) && !empty(config('whatsapp.api_key')),
-            'telegram_configured' => !empty(config('services.telegram.bot_token')),
+            'telegram_configured' => !empty(Setting::get('telegram_bot_token')) || !empty(config('services.telegram.bot_token')),
         ];
 
         return view('notifications.index', compact('logs', 'stats', 'settings', 'gateways', 'user'));

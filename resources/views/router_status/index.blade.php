@@ -577,6 +577,32 @@ document.addEventListener('DOMContentLoaded', function () {
             `;
         });
     }
+
+    // Auto-poll status setiap 15 detik untuk mendeteksi perubahan router online/offline
+    setInterval(() => {
+        fetch('/api/routers/status', {
+            headers: { 'Accept': 'application/json' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data && data.routers) {
+                let anyChanged = false;
+                data.routers.forEach(r => {
+                    const badge = document.getElementById(`status-badge-${r.id}`);
+                    if (badge) {
+                        const currentText = badge.innerText.trim().toLowerCase();
+                        if (currentText !== r.status) {
+                            anyChanged = true;
+                        }
+                    }
+                });
+                if (anyChanged) {
+                    window.location.reload();
+                }
+            }
+        })
+        .catch(() => {});
+    }, 15000);
 });
 </script>
 @endpush

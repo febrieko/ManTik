@@ -166,14 +166,22 @@
         fetch(`${baseUrl}/api/routers/${routerId}/live-stats`)
             .then(r => r.json())
             .then(res => {
-                if(res.success) {
-                    document.getElementById(`cpu-load-${routerId}`).innerText = res.data.cpu_load + '%';
-                    document.getElementById(`memory-load-${routerId}`).innerText = res.data.memory_percent + '%';
-                    updateChart(charts[`res-${routerId}`], [res.data.cpu_load, res.data.memory_percent]);
-                    document.getElementById(`status-dot-${routerId}`).className = 'router-status-dot online';
+                const dot = document.getElementById(`status-dot-${routerId}`);
+                if(res.success && res.data) {
+                    const cpuEl = document.getElementById(`cpu-load-${routerId}`);
+                    const memEl = document.getElementById(`memory-load-${routerId}`);
+                    if (cpuEl) cpuEl.innerText = res.data.cpu_load + '%';
+                    if (memEl) memEl.innerText = res.data.memory_percent + '%';
+                    if (charts[`res-${routerId}`]) {
+                        updateChart(charts[`res-${routerId}`], [res.data.cpu_load, res.data.memory_percent]);
+                    }
+                    if (dot) dot.className = 'router-status-dot online';
+                } else {
+                    if (dot) dot.className = 'router-status-dot offline';
                 }
             }).catch(() => {
-                document.getElementById(`status-dot-${routerId}`).className = 'router-status-dot offline';
+                const dot = document.getElementById(`status-dot-${routerId}`);
+                if (dot) dot.className = 'router-status-dot offline';
             });
 
         // Fetch Traffic

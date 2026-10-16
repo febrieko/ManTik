@@ -11,11 +11,12 @@ class RouterApiController extends Controller
 {
     public function status()
     {
-        $routers = Router::all()->map(function ($router) {
+        $routers = Router::where('is_active', true)->get()->map(function ($router) {
             return [
-                'id'     => $router->id,
-                'name'   => $router->name,
-                'status' => $router->status,
+                'id'       => $router->id,
+                'name'     => $router->name,
+                'status'   => $router->status,
+                'duration' => $router->getCurrentStatusDurationFormatted(),
             ];
         });
 
@@ -50,6 +51,11 @@ class RouterApiController extends Controller
                 return response()->json(['success' => false, 'message' => 'No data']);
             }
 
+            // Jika status router di database sebelumnya bukan 'online', perbarui statusnya
+            if ($router->status !== 'online') {
+                app(\App\Services\RouterMonitorService::class)->checkRouter($router);
+            }
+
             $totalMem = $sysResource['total-memory'] ?? 0;
             $freeMem = $sysResource['free-memory'] ?? 0;
             $usedMem = max(0, $totalMem - $freeMem);
@@ -64,6 +70,10 @@ class RouterApiController extends Controller
                 ]
             ]);
         } catch (\Exception $e) {
+            // Jika sebelumnya tercatat online tapi gagal diakses, periksa/catat transisi offline
+            if ($router->status === 'online') {
+                app(\App\Services\RouterMonitorService::class)->checkRouter($router);
+            }
             return response()->json(['success' => false, 'message' => $e->getMessage()]);
         }
     }

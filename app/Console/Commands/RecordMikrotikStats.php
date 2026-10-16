@@ -16,6 +16,15 @@ class RecordMikrotikStats extends Command
 
     public function handle()
     {
+        $monitorService = app(\App\Services\RouterMonitorService::class);
+
+        // 1. Periksa router yang saat ini berstatus offline / non-online untuk mendeteksi apakah sudah kembali online
+        $offlineRouters = Router::where('is_active', true)->where('status', '!=', 'online')->get();
+        foreach ($offlineRouters as $offlineRouter) {
+            $monitorService->checkRouter($offlineRouter);
+        }
+
+        // 2. Ambil semua router yang online (termasuk yang baru saja pulih menjadi online)
         $routers = Router::where('is_active', true)->where('status', 'online')->get();
         $now = now();
 

@@ -155,6 +155,15 @@ class RouterMonitorService
                 $activeLog->duration_seconds = max(1, (int) ($now->timestamp - $activeLog->started_at->timestamp));
                 $activeLog->save();
 
+                // Close any other dangling unclosed logs for this router
+                RouterUptimeLog::where('router_id', $router->id)
+                    ->whereNull('ended_at')
+                    ->where('id', '!=', $activeLog->id)
+                    ->update([
+                        'ended_at' => $now,
+                        'duration_seconds' => max(1, (int) ($now->timestamp - $activeLog->started_at->timestamp)),
+                    ]);
+
                 // Open new log
                 RouterUptimeLog::create([
                     'router_id'        => $router->id,

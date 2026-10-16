@@ -29,41 +29,36 @@ class MikrotikService
      */
     public function connect(): bool
     {
+        $primaryLegacy = ($this->router->ros_version === 'v6');
+        $timeout = (int) config('mikrotik.timeout', 15);
+
         try {
             $this->client = new Client([
                 'host'     => $this->router->host,
                 'user'     => $this->router->username,
                 'pass'     => $this->router->password,
                 'port'     => (int) $this->router->port,
-                'timeout'  => (int) config('mikrotik.timeout', 30),
-                'legacy'   => false,
+                'timeout'  => $timeout,
+                'legacy'   => $primaryLegacy,
             ]);
             return true;
         } catch (Exception $e) {
-            if (str_contains(strtolower($e->getMessage()), 'stream timed out') || 
-                str_contains(strtolower($e->getMessage()), 'invalid user name') ||
-                str_contains(strtolower($e->getMessage()), 'invalid password') ||
-                str_contains(strtolower($e->getMessage()), 'not legacy')) {
-                try {
-                    // Coba login dengan mode legacy untuk RouterOS versi lama
-                    $this->client = new Client([
-                        'host'     => $this->router->host,
-                        'user'     => $this->router->username,
-                        'pass'     => $this->router->password,
-                        'port'     => (int) $this->router->port,
-                        'timeout'  => (int) config('mikrotik.timeout', 30),
-                        'legacy'   => true,
-                    ]);
-                    return true;
-                } catch (Exception $e2) {
-                    $this->lastError = $e2->getMessage();
-                    Log::error("MikroTik legacy connection failed [{$this->router->name}]: " . $e2->getMessage());
-                    return false;
-                }
+            // Coba mode legacy alternatif jika percobaan pertama gagal (misal jika RouterOS v6/v7 handshake berbeda)
+            try {
+                $this->client = new Client([
+                    'host'     => $this->router->host,
+                    'user'     => $this->router->username,
+                    'pass'     => $this->router->password,
+                    'port'     => (int) $this->router->port,
+                    'timeout'  => $timeout,
+                    'legacy'   => !$primaryLegacy,
+                ]);
+                return true;
+            } catch (Exception $e2) {
+                $this->lastError = $e2->getMessage();
+                Log::error("MikroTik connection failed [{$this->router->name}]: primary (" . ($primaryLegacy ? 'legacy' : 'v7') . "): {$e->getMessage()} | fallback: {$e2->getMessage()}");
+                return false;
             }
-            $this->lastError = $e->getMessage();
-            Log::error("MikroTik connection failed [{$this->router->name}]: " . $e->getMessage());
-            return false;
         }
     }
 

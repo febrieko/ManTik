@@ -81,36 +81,55 @@ class NotificationService
         // 1. Global Admin WhatsApp from settings / config
         $globalWa = Setting::get('whatsapp_admin_phone', config('whatsapp.admin_phone'));
         if (!empty($globalWa)) {
-            $waRecipients[] = $globalWa;
+            $normGlobalWa = $this->whatsapp->normalizePhone($globalWa);
+            if (!empty($normGlobalWa)) {
+                $waRecipients[] = $normGlobalWa;
+            }
         }
 
         // 2. Global Telegram Chat ID / Group ID from settings
         $globalTg = Setting::get('telegram_admin_chat_id');
         if (!empty($globalTg)) {
-            $tgRecipients[] = $globalTg;
+            $tgRecipients[] = trim($globalTg);
         }
 
-        // 3. Super Admin & Admin users
+        // 3. Super Admin & Admin users (menerima notifikasi untuk SEMUA router)
         $adminUsers = User::role(['super-admin', 'admin'])->where('is_active', true)->get();
         foreach ($adminUsers as $u) {
-            if (!empty($u->phone)) $waRecipients[] = $u->phone;
-            if (!empty($u->telegram_chat_id)) $tgRecipients[] = $u->telegram_chat_id;
+            if (!empty($u->phone)) {
+                $normPhone = $this->whatsapp->normalizePhone($u->phone);
+                if (!empty($normPhone)) {
+                    $waRecipients[] = $normPhone;
+                }
+            }
+            if (!empty($u->telegram_chat_id)) {
+                $tgRecipients[] = trim($u->telegram_chat_id);
+            }
         }
 
-        // 4. Teknisi assigned to this router (or all teknisi if none assigned)
-        $teknisiUsers = $router->users()->where('is_active', true)->get();
-        if ($teknisiUsers->isEmpty()) {
-            $teknisiUsers = User::role('teknisi')->where('is_active', true)->get();
-        }
+        // 4. Teknisi: HANYA untuk router yang sudah dienrol ke teknisi tersebut
+        $teknisiUsers = $router->users()
+            ->where('is_active', true)
+            ->whereHas('roles', function ($q) {
+                $q->where('name', 'teknisi');
+            })
+            ->get();
 
         foreach ($teknisiUsers as $tu) {
-            if (!empty($tu->phone)) $waRecipients[] = $tu->phone;
-            if (!empty($tu->telegram_chat_id)) $tgRecipients[] = $tu->telegram_chat_id;
+            if (!empty($tu->phone)) {
+                $normPhone = $this->whatsapp->normalizePhone($tu->phone);
+                if (!empty($normPhone)) {
+                    $waRecipients[] = $normPhone;
+                }
+            }
+            if (!empty($tu->telegram_chat_id)) {
+                $tgRecipients[] = trim($tu->telegram_chat_id);
+            }
         }
 
         // De-duplicate recipients
-        $waRecipients = array_unique(array_filter($waRecipients));
-        $tgRecipients = array_unique(array_filter($tgRecipients));
+        $waRecipients = array_values(array_unique(array_filter($waRecipients)));
+        $tgRecipients = array_values(array_unique(array_filter($tgRecipients)));
 
         $type = $isDown ? 'router_down' : 'router_up';
         $sentCount = 0;
@@ -127,7 +146,7 @@ class NotificationService
                         'router_id'     => $router->id,
                         'type'          => $type,
                         'channel'       => 'whatsapp',
-                        'recipient'     => $phone,
+                        'recipient'     => $res['phone'] ?? $phone,
                         'subject'       => $subject,
                         'message'       => $message,
                         'status'        => $success ? 'sent' : 'failed',
@@ -216,13 +235,14 @@ class NotificationService
         // Send via WhatsApp
         if (!empty($phone) && in_array($channelSetting, ['whatsapp', 'both'])) {
             try {
-                $res = $this->whatsapp->sendMessage($phone, $message);
+                $normPhone = $this->whatsapp->normalizePhone($phone);
+                $res = $this->whatsapp->sendMessage($normPhone, $message);
                 $success = $res['success'] ?? false;
                 NotificationLog::create([
                     'customer_id'   => $customerId,
                     'type'          => 'voucher_expiring',
                     'channel'       => 'whatsapp',
-                    'recipient'     => $phone,
+                    'recipient'     => $res['phone'] ?? $normPhone,
                     'subject'       => $subject,
                     'message'       => $message,
                     'status'        => $success ? 'sent' : 'failed',
@@ -296,13 +316,14 @@ class NotificationService
         // Send via WhatsApp
         if (!empty($phone) && in_array($channelSetting, ['whatsapp', 'both'])) {
             try {
-                $res = $this->whatsapp->sendMessage($phone, $message);
+                $normPhone = $this->whatsapp->normalizePhone($phone);
+                $res = $this->whatsapp->sendMessage($normPhone, $message);
                 $success = $res['success'] ?? false;
                 NotificationLog::create([
                     'customer_id'   => $customerId,
                     'type'          => 'balance_low',
                     'channel'       => 'whatsapp',
-                    'recipient'     => $phone,
+                    'recipient'     => $res['phone'] ?? $normPhone,
                     'subject'       => $subject,
                     'message'       => $message,
                     'status'        => $success ? 'sent' : 'failed',
@@ -359,12 +380,13 @@ class NotificationService
         if (in_array($channel, ['whatsapp', 'both'])) {
             $phone = $targetPhone ?: Setting::get('whatsapp_admin_phone', config('whatsapp.admin_phone'));
             if ($phone) {
-                $res = $this->whatsapp->sendMessage($phone, $message);
+                $normPhone = $this->whatsapp->normalizePhone($phone);
+                $res = $this->whatsapp->sendMessage($normPhone, $message);
                 $success = $res['success'] ?? false;
                 NotificationLog::create([
                     'type'          => 'custom',
                     'channel'       => 'whatsapp',
-                    'recipient'     => $phone,
+                    'recipient'     => $res['phone'] ?? $normPhone,
                     'subject'       => 'Test Notifikasi WhatsApp',
                     'message'       => $message,
                     'status'        => $success ? 'sent' : 'failed',

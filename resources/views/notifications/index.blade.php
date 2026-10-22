@@ -329,17 +329,30 @@
                     </div>
                 </div>
 
-                <div class="grid grid-2" style="gap:16px;">
+                <div class="grid grid-2 mb-16" style="gap:16px;">
                     <div class="form-group">
                         <label class="form-label">Nomor WhatsApp Admin Global (Opsional):</label>
-                        <input type="text" name="whatsapp_admin_phone" value="{{ $settings['whatsapp_admin_phone'] }}" class="form-control" placeholder="Contoh: 6281234567890">
-                        <small class="text-xs text-muted">Nomor kontak admin pusat yang menerima seluruh alert router.</small>
+                        <input type="text" name="whatsapp_admin_phone" value="{{ $settings['whatsapp_admin_phone'] }}" class="form-control" placeholder="Contoh: 081234567890 atau 6281234567890">
+                        <small class="text-xs text-muted">Nomor kontak admin pusat yang menerima seluruh alert router (bisa diawali 08... atau 62...).</small>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Telegram Chat ID / Group ID Admin (Opsional):</label>
                         <input type="text" name="telegram_admin_chat_id" value="{{ $settings['telegram_admin_chat_id'] }}" class="form-control" placeholder="Contoh: -100123456789 atau 987654321">
                         <small class="text-xs text-muted">Bisa berupa ID user atau ID grup/channel teknisi Telegram.</small>
                     </div>
+                </div>
+
+                {{-- Info Box: Distribusi Notifikasi & Format Nomor Telepon --}}
+                <div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.25);border-radius:8px;padding:12px 16px;font-size:12px;color:var(--text-secondary);line-height:1.6;">
+                    <strong style="color:#00d4ff;display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+                        Ketentuan Distribusi Notifikasi Router & Format Nomor:
+                    </strong>
+                    <ul style="margin:0;padding-left:18px;">
+                        <li><strong>Super Admin & Admin:</strong> Menerima notifikasi offline & online untuk <em>seluruh router</em>.</li>
+                        <li><strong>Teknisi:</strong> <em>Hanya menerima notifikasi offline & online dari router yang sudah dienrol / ditugaskan</em> ke akun teknisi tersebut.</li>
+                        <li><strong>Format Nomor Telepon:</strong> Penulisan nomor WhatsApp bebas diawali angka <code>0</code> (contoh: <code>08123456789</code>) maupun <code>62</code> (contoh: <code>628123456789</code>). Sistem otomatis menormalisasinya ke format standar internasional WhatsApp.</li>
+                    </ul>
                 </div>
             </div>
         </div>
@@ -457,7 +470,8 @@
                 <div class="grid grid-2" style="gap:16px;">
                     <div class="form-group">
                         <label class="form-label">Nomor WhatsApp Pribadi Saya:</label>
-                        <input type="text" name="my_phone" value="{{ $user->phone }}" class="form-control" placeholder="Contoh: 6281234567890">
+                        <input type="text" name="my_phone" value="{{ $user->phone }}" class="form-control" placeholder="Contoh: 081234567890 atau 6281234567890">
+                        <small class="text-xs text-muted">Bisa diawali 08... atau 62... (otomatis dinormalisasi ke format WhatsApp)</small>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Telegram Chat ID Pribadi Saya:</label>
@@ -514,8 +528,8 @@
 
             <div class="form-group mb-16" id="field-test-phone">
                 <label class="form-label">Nomor WhatsApp Tujuan:</label>
-                <input type="text" name="target_phone" value="{{ $user->phone ?: $settings['whatsapp_admin_phone'] }}" class="form-control" placeholder="Contoh: 6281234567890">
-                <small class="text-xs text-muted">Format internasional (diawali 62...)</small>
+                <input type="text" name="target_phone" value="{{ $user->phone ?: $settings['whatsapp_admin_phone'] }}" class="form-control" placeholder="Contoh: 081234567890 atau 6281234567890">
+                <small class="text-xs text-muted">Bisa diawali 08... atau 62...</small>
             </div>
 
             <div class="form-group mb-24" id="field-test-telegram">

@@ -31,6 +31,7 @@ class RouterController extends Controller
     {
         $validated = $request->validate([
             'name'        => 'required|string|max:100',
+            'ssid'        => 'nullable|string|max:100',
             'host'        => 'required|string|max:100',
             'port'        => 'required|integer|min:1|max:65535',
             'username'    => 'required|string|max:50',
@@ -75,6 +76,7 @@ class RouterController extends Controller
     {
         $validated = $request->validate([
             'name'        => 'required|string|max:100',
+            'ssid'        => 'nullable|string|max:100',
             'host'        => 'required|string|max:100',
             'port'        => 'required|integer|min:1|max:65535',
             'username'    => 'required|string|max:50',

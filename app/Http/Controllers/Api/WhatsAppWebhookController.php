@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\HotspotVoucher;
 use App\Models\Package;
 use App\Models\Router;
+use App\Models\Setting;
 use App\Models\WaVoucherRequest;
 use App\Services\MikrotikService;
 use App\Services\WhatsAppService;
@@ -95,8 +96,9 @@ class WhatsAppWebhookController extends Controller
             return $this->handleInfoRequest($phone);
         }
 
-        // Parse format: VOUCHER#KODE_PAKET#NAMA
+        // Parse format: VOUCHER#KODE_PAKET#NAMA atau VOUCHER#SSID_OR_ROUTER#KODE_PAKET#NAMA
         $parts = explode('#', strtoupper($messageBody));
+        $rawParts = explode('#', $messageBody);
 
         if (count($parts) < 2 || trim($parts[0]) !== 'VOUCHER') {
             // Pesan tidak dikenali, kirim petunjuk
@@ -105,18 +107,25 @@ class WhatsAppWebhookController extends Controller
             return response()->json(['status' => 'invalid_format']);
         }
 
-        $packageCode = trim($parts[1]);
-        // Nama jika diisi setelah pemisah kedua
-        $rawParts = explode('#', $messageBody);
-        $requesterName = count($rawParts) >= 3 
-            ? trim(implode(' ', array_slice(array_map('trim', $rawParts), 2))) 
-            : ($senderName ?: 'Pengunjung');
+        $routerQuery = null;
+        if (count($parts) >= 4) {
+            // Format: VOUCHER#SSID_OR_ROUTER#KODE_PAKET#NAMA
+            $routerQuery = trim($parts[1]);
+            $packageCode = trim($parts[2]);
+            $requesterName = trim(implode(' ', array_slice(array_map('trim', $rawParts), 3)));
+        } else {
+            // Format: VOUCHER#KODE_PAKET#NAMA
+            $packageCode = trim($parts[1]);
+            $requesterName = count($rawParts) >= 3 
+                ? trim(implode(' ', array_slice(array_map('trim', $rawParts), 2))) 
+                : ($senderName ?: 'Pengunjung');
+        }
 
         if (empty($requesterName)) {
             $requesterName = 'Pengunjung';
         }
 
-        return $this->processVoucherRequest($phone, $packageCode, $requesterName);
+        return $this->processVoucherRequest($phone, $packageCode, $requesterName, $routerQuery);
     }
 
     /**
@@ -156,7 +165,7 @@ class WhatsAppWebhookController extends Controller
     /**
      * Proses permintaan voucher dari pengunjung.
      */
-    protected function processVoucherRequest(string $phone, string $packageCode, string $requesterName)
+    protected function processVoucherRequest(string $phone, string $packageCode, string $requesterName, ?string $routerQuery = null)
     {
         // Cek apakah nomor ini sudah pernah request dalam 1 jam terakhir (anti-spam)
         $recentRequest = WaVoucherRequest::where('phone', $phone)
@@ -170,6 +179,28 @@ class WhatsAppWebhookController extends Controller
                 "⏳ *Permintaan Terlalu Sering*\n\nAnda baru saja mendapatkan voucher. Harap tunggu minimal 1 jam sebelum meminta voucher baru.\n\nHubungi admin jika ada masalah."
             );
             return response()->json(['status' => 'rate_limited']);
+        }
+
+        // Jika routerQuery disertakan (misal SSID atau ID router)
+        $targetRouter = null;
+        if (!empty($routerQuery)) {
+            $targetRouter = Router::where('is_active', true)
+                ->where(function ($q) use ($routerQuery) {
+                    $q->where('id', $routerQuery)
+                      ->orWhereRaw('UPPER(ssid) = ?', [strtoupper($routerQuery)])
+                      ->orWhereRaw('UPPER(name) = ?', [strtoupper($routerQuery)])
+                      ->orWhere('ssid', 'like', "%{$routerQuery}%")
+                      ->orWhere('name', 'like', "%{$routerQuery}%");
+                })
+                ->first();
+
+            if (!$targetRouter) {
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ *Lokasi WiFi / Router Tidak Ditemukan*\n\nTidak ditemukan WiFi hotspot dengan nama/kode *{$routerQuery}*.\n\nSilakan periksa nama WiFi yang tertera pada banner lokasi Anda atau ketik *PAKET*."
+                );
+                return response()->json(['status' => 'router_not_found']);
+            }
         }
 
         // Cari paket berdasarkan kode (slug)
@@ -196,28 +227,34 @@ class WhatsAppWebhookController extends Controller
                 'package_code'   => $packageCode,
                 'status'         => 'failed',
                 'failure_reason' => 'Package not found: ' . $packageCode,
-                'raw_message'    => "VOUCHER#{$packageCode}#{$requesterName}",
+                'raw_message'    => "VOUCHER#" . ($routerQuery ? "{$routerQuery}#" : "") . "{$packageCode}#{$requesterName}",
             ]);
 
             return response()->json(['status' => 'package_not_found']);
         }
 
-        // Cari voucher yang tersedia di database
-        $voucher = HotspotVoucher::where('package_id', $package->id)
+        // Cari voucher yang tersedia di database (dengan relasi router)
+        $voucherQuery = HotspotVoucher::with('router')
+            ->where('package_id', $package->id)
             ->where('is_used', false)
             ->whereNull('used_at')
             ->where(function ($q) {
                 $q->whereNull('expires_at')
                   ->orWhere('expires_at', '>', now());
-            })
-            ->lockForUpdate()
-            ->first();
+            });
+
+        if ($targetRouter) {
+            $voucherQuery->where('router_id', $targetRouter->id);
+        }
+
+        $voucher = $voucherQuery->lockForUpdate()->first();
 
         if (!$voucher) {
             // Tidak ada stok voucher
+            $locationInfo = $targetRouter ? " untuk WiFi *{$targetRouter->ssid}*" : "";
             $this->wa->sendMessage(
                 $phone,
-                "❌ *Voucher Tidak Tersedia*\n\nMaaf, stok voucher untuk paket *{$package->name}* sedang habis.\n\nSilakan coba paket lain atau hubungi admin kami."
+                "❌ *Voucher Tidak Tersedia*\n\nMaaf, stok voucher untuk paket *{$package->name}*{$locationInfo} sedang habis.\n\nSilakan coba paket lain atau hubungi admin kami."
             );
 
             WaVoucherRequest::create([
@@ -227,7 +264,7 @@ class WhatsAppWebhookController extends Controller
                 'package_id'     => $package->id,
                 'status'         => 'failed',
                 'failure_reason' => 'No voucher stock',
-                'raw_message'    => "VOUCHER#{$packageCode}#{$requesterName}",
+                'raw_message'    => "VOUCHER#" . ($routerQuery ? "{$routerQuery}#" : "") . "{$packageCode}#{$requesterName}",
             ]);
 
             return response()->json(['status' => 'out_of_stock']);
@@ -255,7 +292,7 @@ class WhatsAppWebhookController extends Controller
                 'voucher_id'     => $voucher->id,
                 'voucher_code'   => $voucher->code,
                 'status'         => 'success',
-                'raw_message'    => "VOUCHER#{$packageCode}#{$requesterName}",
+                'raw_message'    => "VOUCHER#" . ($routerQuery ? "{$routerQuery}#" : "") . "{$packageCode}#{$requesterName}",
             ]);
 
             DB::commit();
@@ -274,6 +311,11 @@ class WhatsAppWebhookController extends Controller
             return response()->json(['status' => 'error', 'message' => $e->getMessage()]);
         }
 
+        // Ambil data router & brand hotspot
+        $router = $voucher->router;
+        $ssid = $router?->ssid ?: $router?->name;
+        $brandName = Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+
         // Hitung durasi display
         $durationLabel = $package->duration_days >= 1
             ? $package->duration_days . ' Hari'
@@ -288,6 +330,9 @@ class WhatsAppWebhookController extends Controller
             'duration'     => $durationLabel,
             'expires_at'   => $expiresAt->toDateTimeString(),
             'price'        => $package->price,
+            'router_name'  => $router?->name,
+            'ssid'         => $ssid,
+            'brand_name'   => $brandName,
         ]);
 
         // Kirim notifikasi ke admin (jika dikonfigurasi)

@@ -57,31 +57,51 @@ class TelegramWebhookController extends Controller
         } elseif (strpos($text, '/cek_saldo') === 0) {
             $this->telegram->sendMessage($chatId, "💰 Saldo Anda saat ini: *Rp " . number_format($user->balance, 0, ',', '.') . "*");
         } elseif (strtoupper(substr(trim($text), 0, 8)) === 'VOUCHER#') {
-            // Parsing format: VOUCHER#ROUTER_ID#KODE_PAKET#NAMA
+            // Parsing format: VOUCHER#KODE_PAKET#NAMA atau VOUCHER#SSID_ROUTER#KODE_PAKET#NAMA
             $this->processTextVoucherRequest($chatId, $user, trim($text));
         } else {
-            $this->telegram->sendMessage($chatId, "Ketik /start untuk melihat menu, atau kirim pesan dengan format:\n`VOUCHER#ID_ROUTER#KODE_PAKET#NAMA`");
+            $this->telegram->sendMessage($chatId, "Ketik /start untuk melihat menu, atau kirim pesan dengan format:\n`VOUCHER#KODE_PAKET#NAMA` atau\n`VOUCHER#SSID_ROUTER#KODE_PAKET#NAMA`");
         }
     }
 
     protected function processTextVoucherRequest($chatId, $user, $text)
     {
         $parts = explode('#', strtoupper($text));
+        $rawParts = explode('#', $text);
         
-        if (count($parts) < 3) {
-            $this->telegram->sendMessage($chatId, "❌ *Format Salah*\n\nFormat yang benar:\n`VOUCHER#ID_ROUTER#KODE_PAKET#NAMA_ANDA`\n\nContoh:\n`VOUCHER#1#1JAM#Budi`");
+        if (count($parts) < 2) {
+            $this->telegram->sendMessage($chatId, "❌ *Format Salah*\n\nFormat yang benar:\n`VOUCHER#KODE_PAKET#NAMA` atau\n`VOUCHER#SSID_ATAU_ROUTER#KODE_PAKET#NAMA`\n\nContoh:\n`VOUCHER#1JAM#Budi`\n`VOUCHER#WIFI_WARUNG#1JAM#Budi`");
             return;
         }
 
-        $routerId = trim($parts[1]);
-        $packageCode = trim($parts[2]);
-        $requesterName = count($parts) >= 4 ? trim(implode(' ', array_slice(array_map('trim', explode('#', $text)), 3))) : $user->first_name;
+        $routerQuery = null;
+        if (count($parts) >= 4) {
+            $routerQuery = trim($parts[1]);
+            $packageCode = trim($parts[2]);
+            $requesterName = trim(implode(' ', array_slice(array_map('trim', $rawParts), 3)));
+        } else {
+            $packageCode = trim($parts[1]);
+            $requesterName = count($rawParts) >= 3 
+                ? trim(implode(' ', array_slice(array_map('trim', $rawParts), 2))) 
+                : ($user->first_name ?: 'Pengunjung');
+        }
 
-        // Cari Router
-        $router = \App\Models\Router::find($routerId);
-        if (!$router) {
-            $this->telegram->sendMessage($chatId, "❌ Router dengan ID *{$routerId}* tidak ditemukan.");
-            return;
+        if (empty($requesterName)) {
+            $requesterName = $user->first_name ?: 'Pengunjung';
+        }
+
+        // Cari Router jika ditentukan
+        $router = null;
+        if ($routerQuery) {
+            $router = \App\Models\Router::where('id', $routerQuery)
+                ->orWhere('ssid', $routerQuery)
+                ->orWhere('name', $routerQuery)
+                ->first();
+
+            if (!$router) {
+                $this->telegram->sendMessage($chatId, "❌ Router / SSID *{$routerQuery}* tidak ditemukan.");
+                return;
+            }
         }
 
         // Cari Paket
@@ -107,22 +127,29 @@ class TelegramWebhookController extends Controller
         // Cari Voucher untuk Router dan Paket spesifik
         DB::beginTransaction();
         try {
-            $voucher = HotspotVoucher::where('router_id', $router->id)
+            $voucherQuery = HotspotVoucher::with('router')
                 ->where('package_id', $package->id)
                 ->where('is_used', false)
                 ->whereNull('used_at')
                 ->where(function ($q) {
                     $q->whereNull('expires_at')
                       ->orWhere('expires_at', '>', now());
-                })
-                ->lockForUpdate()
-                ->first();
+                });
+
+            if ($router) {
+                $voucherQuery->where('router_id', $router->id);
+            }
+
+            $voucher = $voucherQuery->lockForUpdate()->first();
 
             if (!$voucher) {
                 DB::rollBack();
-                $this->telegram->sendMessage($chatId, "❌ Maaf, stok voucher untuk paket ini di Router *{$router->name}* sedang habis.");
+                $targetName = $router ? "Router *{$router->name}*" : "sistem";
+                $this->telegram->sendMessage($chatId, "❌ Maaf, stok voucher untuk paket ini di {$targetName} sedang habis.");
                 return;
             }
+
+            $activeRouter = $voucher->router ?? $router;
 
             // Potong saldo jika tidak gratis
             if ($package->price > 0) {
@@ -149,9 +176,16 @@ class TelegramWebhookController extends Controller
 
             DB::commit();
 
-            $reply  = "✅ *Permintaan Voucher Berhasil!*\n\n";
-            $reply .= "🎟 Kode: *{$voucher->code}*\n";
-            $reply .= "📡 Router: {$router->name}\n";
+            $brandName = \App\Models\Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+            $reply  = "🌐 *{$brandName}*\n";
+            $reply .= "✅ *Permintaan Voucher Berhasil!*\n\n";
+            $reply .= "🎟 Kode: `{$voucher->code}`\n";
+            if ($activeRouter && !empty($activeRouter->ssid)) {
+                $reply .= "📶 WiFi / SSID: *{$activeRouter->ssid}*\n";
+            }
+            if ($activeRouter) {
+                $reply .= "📡 Router: {$activeRouter->name}\n";
+            }
             $reply .= "📦 Paket: {$package->name}\n";
             $reply .= "💰 Harga: " . ($package->price == 0 ? "GRATIS" : "Rp " . number_format($package->price, 0, ',', '.')) . "\n";
             $reply .= "⏱ Berlaku hingga: " . $expiresAt->format('d M Y H:i') . "\n\n";
@@ -193,7 +227,8 @@ class TelegramWebhookController extends Controller
 
     protected function sendMainMenu($chatId, $user)
     {
-        $text = "Selamat datang di *MANTIK Hotspot* 🌐\n\n";
+        $brandName = \App\Models\Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+        $text = "Selamat datang di *{$brandName}* 🌐\n\n";
         $text .= "Hai {$user->first_name}, silakan pilih menu di bawah ini. Saldo Anda: *Rp " . number_format($user->balance, 0, ',', '.') . "*";
 
         $keyboard = [
@@ -213,7 +248,8 @@ class TelegramWebhookController extends Controller
     
     protected function editToMainMenu($chatId, $messageId, $user)
     {
-        $text = "Selamat datang di *MANTIK Hotspot* 🌐\n\n";
+        $brandName = \App\Models\Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+        $text = "Selamat datang di *{$brandName}* 🌐\n\n";
         $text .= "Hai {$user->first_name}, silakan pilih menu di bawah ini. Saldo Anda: *Rp " . number_format($user->balance, 0, ',', '.') . "*";
 
         $keyboard = [
@@ -269,7 +305,8 @@ class TelegramWebhookController extends Controller
         DB::beginTransaction();
         try {
             // Find available voucher
-            $voucher = HotspotVoucher::where('package_id', $package->id)
+            $voucher = HotspotVoucher::with('router')
+                ->where('package_id', $package->id)
                 ->where('is_used', false)
                 ->whereNull('used_at')
                 ->where(function ($q) {
@@ -312,13 +349,23 @@ class TelegramWebhookController extends Controller
 
             $this->telegram->answerCallbackQuery($callbackQueryId, "Pembelian berhasil!");
 
-            $text = "✅ *Pembelian Berhasil!*\n\n";
-            $text .= "🎟 Kode: *{$voucher->code}*\n";
+            $brandName = \App\Models\Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+            $router = $voucher->router;
+
+            $text = "🌐 *{$brandName}*\n";
+            $text .= "✅ *Pembelian Berhasil!*\n\n";
+            $text .= "🎟 Kode: `{$voucher->code}`\n";
+            if ($router && !empty($router->ssid)) {
+                $text .= "📶 WiFi / SSID: *{$router->ssid}*\n";
+            }
+            if ($router) {
+                $text .= "📡 Router: {$router->name}\n";
+            }
             $text .= "📦 Paket: {$package->name}\n";
             $text .= "💰 Harga: Rp " . number_format($package->price, 0, ',', '.') . "\n";
             $text .= "⏱ Berlaku hingga: " . $expiresAt->format('d M Y H:i') . "\n\n";
             $text .= "Sisa Saldo Anda: *Rp " . number_format($user->balance, 0, ',', '.') . "*\n\n";
-            $text .= "Silakan gunakan kode tersebut di halaman login hotspot.";
+            $text .= "Silakan hubungkan perangkat ke WiFi lalu masukkan kode voucher di halaman login.";
 
             $keyboard = [
                 'inline_keyboard' => [

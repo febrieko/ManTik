@@ -11,7 +11,7 @@ class Router extends Model
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
-        'name', 'host', 'port', 'username', 'password', 'description',
+        'name', 'ssid', 'host', 'port', 'username', 'password', 'description',
         'location', 'brand', 'model', 'is_active', 'status', 'last_checked_at', 'ros_version'
     ];
 

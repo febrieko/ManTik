@@ -6,7 +6,12 @@
 <div class="page-header">
     <div class="page-header-title">
         <h2>{{ $router->name }}</h2>
-        <p>{{ $router->host }}:{{ $router->port }} &mdash; {{ $router->location ?? 'Tidak ada lokasi' }}</p>
+        <p>
+            {{ $router->host }}:{{ $router->port }} &mdash; {{ $router->location ?? 'Tidak ada lokasi' }}
+            @if($router->ssid)
+                &nbsp;|&nbsp; <span style="color:#00d4ff;font-weight:600;">📶 SSID: {{ $router->ssid }}</span>
+            @endif
+        </p>
     </div>
     <div class="d-flex gap-8">
         <a href="{{ route('router-status.show', $router) }}" class="btn btn-outline" style="color:#00d4ff;border-color:rgba(0,212,255,0.4);">

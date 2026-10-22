@@ -105,8 +105,8 @@
                 <div class="grid grid-2" style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                     <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="phone">WhatsApp</label>
-                        <input type="text" id="phone" name="phone" class="form-control" value="{{ old('phone') }}" placeholder="Contoh: 628123456789">
-                        <small class="text-muted" style="font-size: 11px; margin-top: 4px; display: block;">Format 62... tanpa tanda + atau spasi</small>
+                        <input type="text" id="phone" name="phone" class="form-control" value="{{ old('phone') }}" placeholder="Contoh: 08123456789 atau 628123456789">
+                        <small class="text-muted" style="font-size: 11px; margin-top: 4px; display: block;">Bisa diawali 0 atau 62 (contoh: 0812... / 62812...)</small>
                     </div>
                     <div class="form-group" style="margin-bottom: 0;">
                         <label class="form-label" for="telegram_chat_id">Telegram Chat ID</label>

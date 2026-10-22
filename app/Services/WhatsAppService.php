@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Setting;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -207,14 +208,19 @@ class WhatsAppService
     /**
      * Kirim pesan error/tidak valid ke pengunjung.
      */
-    public function sendErrorMessage(string $to, string $reason, ?array $availablePackages = null): array
+    public function sendErrorMessage(string $to, string $reason, ?array $availablePackages = null, ?string $brandName = null): array
     {
-        $message  = "❌ *Request Voucher Gagal*\n";
+        $brand = $brandName ?: Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+
+        $message  = "📶 *{$brand}*\n";
+        $message .= "❌ *Permintaan Voucher Gagal*\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
         $message .= "Alasan: {$reason}\n\n";
         $message .= "📋 *Format yang benar:*\n";
-        $message .= "`VOUCHER#KODE_PAKET#NAMA_ANDA`\n\n";
-        $message .= "Contoh:\n`VOUCHER#1JAM#Budi Santoso`\n\n";
+        $message .= "`VOUCHER#KODE_PAKET#NAMA_ANDA`\n";
+        $message .= "Contoh:\n`VOUCHER#1JAM#Budi`\n\n";
+        $message .= "Atau untuk lokasi/WiFi spesifik:\n";
+        $message .= "`VOUCHER#NAMA_SSID#KODE_PAKET#NAMA_ANDA`\n\n";
 
         if ($availablePackages && count($availablePackages) > 0) {
             $message .= "📦 *Paket tersedia:*\n";
@@ -232,9 +238,12 @@ class WhatsAppService
     /**
      * Kirim menu daftar paket ke pengunjung.
      */
-    public function sendPackageMenu(string $to, array $packages): array
+    public function sendPackageMenu(string $to, array $packages, ?string $brandName = null): array
     {
-        $message  = "📶 *Selamat Datang di Hotspot!*\n";
+        $brand = $brandName ?: Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+
+        $message  = "📶 *{$brand}*\n";
+        $message .= "Selamat Datang di Hotspot!\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
         $message .= "Silakan pilih paket internet Anda:\n\n";
 
@@ -250,9 +259,10 @@ class WhatsAppService
 
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
         $message .= "📱 *Cara pesan voucher:*\n";
-        $message .= "Kirim pesan dengan format:\n";
-        $message .= "`VOUCHER#KODE_PAKET#NAMA_ANDA`\n\n";
-        $message .= "Contoh:\n`VOUCHER#1JAM#Budi Santoso`";
+        $message .= "Ketik: `VOUCHER#KODE_PAKET#NAMA`\n";
+        $message .= "Contoh: `VOUCHER#1JAM#Budi`\n\n";
+        $message .= "Atau untuk WiFi/lokasi spesifik:\n";
+        $message .= "Ketik: `VOUCHER#SSID#KODE_PAKET#NAMA`";
 
         return $this->sendMessage($to, $message);
     }
@@ -260,28 +270,42 @@ class WhatsAppService
     /**
      * Build pesan voucher yang akan dikirim ke pengunjung.
      */
-    protected function buildVoucherMessage(array $data): string
+    public function buildVoucherMessage(array $data): string
     {
         $expiresAt = isset($data['expires_at'])
             ? \Carbon\Carbon::parse($data['expires_at'])->locale('id')->isoFormat('D MMMM YYYY, HH:mm')
             : '-';
 
-        $message  = "✅ *Voucher Hotspot Berhasil!*\n";
+        $brandName = !empty($data['brand_name']) 
+            ? $data['brand_name'] 
+            : Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+
+        $ssid = !empty($data['ssid']) 
+            ? $data['ssid'] 
+            : (!empty($data['router_name']) ? $data['router_name'] : 'Hotspot');
+
+        $message  = "📶 *{$brandName}*\n";
+        $message .= "✅ *VOUCHER HOTSPOT AKTIF*\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
-        $message .= "Halo, *{$data['name']}*!\n\n";
+        $message .= "Halo, *{$data['name']}*!\n";
+        $message .= "Berikut adalah kode akses internet Anda:\n\n";
         $message .= "🎟 *Kode Voucher:*\n";
-        $message .= "```{$data['code']}```\n\n";
-        $message .= "📦 Paket: *{$data['package_name']}*\n";
-        $message .= "🚀 Kecepatan: *{$data['speed']}*\n";
-        $message .= "⏱ Masa Aktif: *{$data['duration']}*\n";
-        $message .= "📅 Berlaku hingga: *{$expiresAt}*\n\n";
+        $message .= "```{$data['code']}```\n";
+        $message .= "_(Sentuh/klik kode di atas untuk menyalin)_\n\n";
+        $message .= "📋 *Rincian Paket:*\n";
+        $message .= "• 📦 Paket: *{$data['package_name']}*\n";
+        $message .= "• 🚀 Kecepatan: *{$data['speed']}*\n";
+        $message .= "• ⏱ Masa Aktif: *{$data['duration']}*\n";
+        $message .= "• 📅 Berlaku hingga: *{$expiresAt}*\n";
+        $message .= "• 📡 WiFi / SSID: *{$ssid}*\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
-        $message .= "📋 *Cara menggunakan:*\n";
-        $message .= "1. Sambungkan WiFi ke jaringan hotspot\n";
-        $message .= "2. Buka browser & akan diarahkan ke halaman login\n";
+        $message .= "📱 *Cara Menggunakan:*\n";
+        $message .= "1. Sambungkan WiFi ke jaringan *\"{$ssid}\"*\n";
+        $message .= "2. Buka browser & halaman login akan otomatis terbuka\n";
         $message .= "3. Masukkan kode voucher di atas\n";
-        $message .= "4. Selamat menikmati internet! 🌐\n\n";
-        $message .= "_Terimakasih telah menggunakan layanan kami_ 🙏";
+        $message .= "4. Klik Login & selamat menikmati internet! 🌐\n\n";
+        $message .= "⚠️ _Simpan pesan ini jika koneksi internet terputus sewaktu-waktu._\n";
+        $message .= "_Terimakasih telah menggunakan layanan {$brandName}!_ 🙏";
 
         return $message;
     }
@@ -305,20 +329,28 @@ class WhatsAppService
     }
 
     /**
-     * Normalisasi nomor telepon ke format internasional Indonesia.
+     * Normalisasi nomor telepon ke format internasional Indonesia (diawali 62).
+     * Menerima input yang diawali dengan 0, 62, +62, maupun 8.
      */
-    public function normalizePhone(string $phone): string
+    public function normalizePhone(?string $phone): string
     {
+        if (empty($phone)) {
+            return '';
+        }
+
         // Hapus semua non-digit
         $phone = preg_replace('/\D/', '', $phone);
 
-        // Konversi awalan
-        if (str_starts_with($phone, '08')) {
+        if (empty($phone)) {
+            return '';
+        }
+
+        // Jika diawali 0 (misal: 08123456789), ubah 0 di depan jadi 62 -> 628123456789
+        if (str_starts_with($phone, '0')) {
             $phone = '62' . substr($phone, 1);
         } elseif (str_starts_with($phone, '8') && strlen($phone) >= 9) {
+            // Jika diawali 8 (misal: 8123456789) -> 628123456789
             $phone = '62' . $phone;
-        } elseif (str_starts_with($phone, '+62')) {
-            $phone = '62' . substr($phone, 3);
         }
 
         return $phone;

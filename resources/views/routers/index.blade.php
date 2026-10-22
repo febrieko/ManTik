@@ -84,7 +84,12 @@
                 </div>
                 <div>
                     <div class="router-card-name">{{ $router->name }}</div>
-                    <div class="router-card-host">{{ $router->host }}:{{ $router->port }}</div>
+                    <div class="router-card-host">
+                        {{ $router->host }}:{{ $router->port }}
+                        @if($router->ssid)
+                            &bull; <span style="color:#00d4ff;font-weight:600;">📶 {{ $router->ssid }}</span>
+                        @endif
+                    </div>
                 </div>
             </div>
             <span class="badge {{ $router->status === 'online' ? 'badge-success' : ($router->status === 'offline' ? 'badge-danger' : 'badge-muted') }}">

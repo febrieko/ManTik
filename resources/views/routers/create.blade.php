@@ -76,6 +76,14 @@
             </div>
 
             <div class="form-group">
+                <label class="form-label" for="ssid">Nama WiFi / SSID Hotspot</label>
+                <input type="text" id="ssid" name="ssid" class="form-control" value="{{ old('ssid') }}"
+                       placeholder="Contoh: Hotspot-Kafe, MANTIK-WiFi">
+                @error('ssid') <div class="form-error">{{ $message }}</div> @enderror
+                <small class="text-muted" style="font-size: 11px; margin-top: 4px; display: block;">Nama jaringan WiFi hotspot yang dipancarkan oleh router ini (disertakan pada pesan balasan voucher ke pelanggan)</small>
+            </div>
+
+            <div class="form-group">
                 <label class="form-label" for="password">Password *</label>
                 <div style="position: relative;">
                     <input type="password" id="password" name="password" class="form-control"

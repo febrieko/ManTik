@@ -111,9 +111,19 @@
                         <label class="form-label">Nomor WhatsApp Admin</label>
                         <input type="text" name="admin_phone" class="form-control"
                             value="{{ old('admin_phone', $settings['admin_phone']) }}"
-                            placeholder="6281234567890">
+                            placeholder="Contoh: 081234567890 atau 6281234567890">
                         <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
-                            Nomor untuk menerima notifikasi pesan/voucher. Format: 628xxxxxxxxx.
+                            Nomor untuk menerima notifikasi pesan/voucher (bisa diawali 08... atau 62...).
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">Nama Brand Hotspot</label>
+                        <input type="text" name="brand_name" class="form-control"
+                            value="{{ old('brand_name', $settings['brand_name'] ?? '') }}"
+                            placeholder="Contoh: MANTIK Hotspot, KafeNet WiFi">
+                        <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                            Nama usaha / brand hotspot yang akan ditampilkan pada header dan footer pesan voucher WhatsApp & Telegram.
                         </small>
                     </div>
 
@@ -134,7 +144,10 @@
                     @csrf
                     <div class="form-group">
                         <label class="form-label">Nomor Tujuan Test</label>
-                        <input type="text" name="phone" class="form-control" placeholder="6281234567890" required>
+                        <input type="text" name="phone" class="form-control" placeholder="Contoh: 081234567890 atau 6281234567890" required>
+                        <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                            Bisa diawali 08... atau 62...
+                        </small>
                     </div>
                     <div class="form-group">
                         <label class="form-label">Pesan (opsional)</label>

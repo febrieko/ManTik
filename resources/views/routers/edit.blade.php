@@ -56,6 +56,11 @@
                 <input type="password" name="password" class="form-control" placeholder="Password baru (opsional)">
             </div>
         </div>
+        <div class="form-group">
+            <label class="form-label">Nama WiFi / SSID Hotspot</label>
+            <input type="text" name="ssid" class="form-control" value="{{ old('ssid', $router->ssid) }}" placeholder="Contoh: Hotspot-Kafe, MANTIK-WiFi">
+            <small class="text-muted" style="font-size: 11px; margin-top: 4px; display: block;">Nama jaringan WiFi hotspot yang dipancarkan oleh router ini (disertakan pada pesan balasan voucher ke pelanggan)</small>
+        </div>
         <div class="grid grid-2">
             <div class="form-group">
                 <label class="form-label">Lokasi</label>

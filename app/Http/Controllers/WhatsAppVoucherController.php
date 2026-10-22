@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\WaVoucherRequest;
 use App\Models\Package;
 use App\Models\HotspotVoucher;
+use App\Models\Setting;
 use App\Services\WhatsAppService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -80,6 +81,7 @@ class WhatsAppVoucherController extends Controller
             'session'        => config('whatsapp.session', 'default'),
             'webhook_secret' => config('whatsapp.webhook_secret'),
             'admin_phone'    => config('whatsapp.admin_phone'),
+            'brand_name'     => Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot')),
         ];
 
         $availablePackages = Package::where('type', 'hotspot')
@@ -106,17 +108,26 @@ class WhatsAppVoucherController extends Controller
             'session'        => 'nullable|string|max:100',
             'webhook_secret' => 'nullable|string|max:100',
             'admin_phone'    => 'nullable|string|max:20',
+            'brand_name'     => 'nullable|string|max:100',
         ]);
+
+        if (isset($validated['brand_name'])) {
+            Setting::set('hotspot_brand_name', trim($validated['brand_name']), 'hotspot');
+        }
 
         $envPath = base_path('.env');
         $content = file_get_contents($envPath);
+
+        $adminPhone = !empty($validated['admin_phone'])
+            ? $this->wa->normalizePhone($validated['admin_phone'])
+            : '';
 
         $replacements = [
             'WHATSAPP_API_URL'        => $validated['api_url'],
             'WHATSAPP_GATEWAY_TYPE'   => $validated['gateway_type'] ?? 'auto',
             'WHATSAPP_SESSION'        => $validated['session'] ?? 'default',
             'WHATSAPP_WEBHOOK_SECRET' => $validated['webhook_secret'] ?? '',
-            'WHATSAPP_ADMIN_PHONE'    => $validated['admin_phone'] ?? '',
+            'WHATSAPP_ADMIN_PHONE'    => $adminPhone,
         ];
 
         // Hanya update API key jika diisi (biar tidak overwrite dengan kosong)
@@ -169,6 +180,9 @@ class WhatsAppVoucherController extends Controller
 
         $voucher = $waRequest->voucher;
         $package = $waRequest->package;
+        $router = $voucher?->router;
+        $ssid = $router?->ssid ?: $router?->name;
+        $brandName = Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
 
         $durationLabel = $package
             ? ($package->duration_days . ' Hari')
@@ -181,6 +195,9 @@ class WhatsAppVoucherController extends Controller
             'speed'        => $package ? "{$package->bandwidth_up}/{$package->bandwidth_down} Mbps" : '-',
             'duration'     => $durationLabel,
             'expires_at'   => $voucher->expires_at,
+            'router_name'  => $router?->name,
+            'ssid'         => $ssid,
+            'brand_name'   => $brandName,
         ]);
 
         if ($result['success']) {

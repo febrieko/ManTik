@@ -132,9 +132,13 @@ class NotificationController extends Controller
             'my_telegram_chat_id'            => 'nullable|string|max:50',
         ]);
 
+        $waAdminPhone = !empty($validated['whatsapp_admin_phone'])
+            ? app(\App\Services\WhatsAppService::class)->normalizePhone($validated['whatsapp_admin_phone'])
+            : '';
+
         Setting::set('router_alert_enabled', $request->has('router_alert_enabled'), 'notification');
         Setting::set('router_alert_channel', $validated['router_alert_channel'], 'notification');
-        Setting::set('whatsapp_admin_phone', $validated['whatsapp_admin_phone'] ?? '', 'notification');
+        Setting::set('whatsapp_admin_phone', $waAdminPhone, 'notification');
         Setting::set('telegram_admin_chat_id', $validated['telegram_admin_chat_id'] ?? '', 'notification');
 
         Setting::set('customer_voucher_alert_enabled', $request->has('customer_voucher_alert_enabled'), 'notification');
@@ -145,7 +149,7 @@ class NotificationController extends Controller
         Setting::set('customer_balance_alert_channel', $validated['customer_balance_alert_channel'], 'notification');
         Setting::set('customer_balance_threshold', (float) $validated['customer_balance_threshold'], 'notification');
 
-        // Update personal user contact
+        // Update personal user contact (phone otomatis dinormalisasi oleh model User)
         $user = auth()->user();
         $user->update([
             'phone'            => $validated['my_phone'] ?? $user->phone,
@@ -169,9 +173,13 @@ class NotificationController extends Controller
             'target_telegram_id' => 'nullable|string|max:50',
         ]);
 
+        $targetPhone = !empty($validated['target_phone'])
+            ? app(\App\Services\WhatsAppService::class)->normalizePhone($validated['target_phone'])
+            : null;
+
         $results = $notificationService->sendTestNotification(
             $validated['channel'],
-            $validated['target_phone'] ?? null,
+            $targetPhone,
             $validated['target_telegram_id'] ?? null
         );
 

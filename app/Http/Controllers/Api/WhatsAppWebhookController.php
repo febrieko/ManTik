@@ -46,9 +46,41 @@ class WhatsAppWebhookController extends Controller
             }
         }
 
-        // Ambil data pesan dari request (sesuaikan dengan format gateway Anda)
-        $senderPhone = $request->input('sender') ?? $request->input('from') ?? $request->input('phone');
-        $messageBody = trim($request->input('message') ?? $request->input('text') ?? $request->input('body') ?? '');
+        // Abaikan jika pesan dikirim oleh bot/nomor gateway itu sendiri (mencegah auto-reply loop)
+        if ($request->input('payload.fromMe') === true || 
+            $request->input('data.fromMe') === true || 
+            $request->input('fromMe') === true) {
+            return response()->json(['status' => 'ignored', 'reason' => 'from_me']);
+        }
+
+        // Ambil data pesan dari request (Mendukung OpenWA, Fonnte, Wablas, dan generic gateway)
+        $payload = $request->input('payload') ?? $request->input('data') ?? [];
+
+        $senderPhone = null;
+        $senderName  = null;
+        $messageBody = null;
+
+        if (is_array($payload) && !empty($payload)) {
+            $senderPhone = $payload['from'] ?? $payload['sender']['id'] ?? $payload['chatId'] ?? null;
+            $messageBody = $payload['body'] ?? $payload['text'] ?? $payload['message'] ?? null;
+            $senderName  = $payload['sender']['pushname'] ?? $payload['sender']['name'] ?? null;
+        }
+
+        if (!$senderPhone) {
+            $senderRaw = $request->input('sender');
+            if (is_array($senderRaw)) {
+                $senderPhone = $senderRaw['id'] ?? $senderRaw['phone'] ?? null;
+                $senderName  = $senderRaw['pushname'] ?? $senderRaw['name'] ?? null;
+            } else {
+                $senderPhone = $senderRaw ?? $request->input('from') ?? $request->input('phone');
+            }
+        }
+
+        if (empty($messageBody)) {
+            $messageBody = $request->input('message') ?? $request->input('text') ?? $request->input('body') ?? '';
+        }
+
+        $messageBody = trim((string) $messageBody);
 
         if (!$senderPhone || !$messageBody) {
             return response()->json(['status' => 'ignored', 'reason' => 'empty_message']);
@@ -59,14 +91,14 @@ class WhatsAppWebhookController extends Controller
         Log::info('[WA Webhook] Pesan masuk dari ' . $phone . ': ' . $messageBody);
 
         // Cek pesan INFO untuk mendapatkan daftar paket
-        if (strtoupper(trim($messageBody)) === 'INFO' || strtoupper(trim($messageBody)) === 'PAKET') {
+        if (strtoupper($messageBody) === 'INFO' || strtoupper($messageBody) === 'PAKET') {
             return $this->handleInfoRequest($phone);
         }
 
         // Parse format: VOUCHER#KODE_PAKET#NAMA
-        $parts = explode('#', strtoupper(trim($messageBody)));
+        $parts = explode('#', strtoupper($messageBody));
 
-        if (count($parts) < 3 || trim($parts[0]) !== 'VOUCHER') {
+        if (count($parts) < 2 || trim($parts[0]) !== 'VOUCHER') {
             // Pesan tidak dikenali, kirim petunjuk
             $availablePackages = $this->getAvailablePackagesFormatted();
             $this->wa->sendErrorMessage($phone, 'Format pesan tidak valid.', $availablePackages);
@@ -74,8 +106,12 @@ class WhatsAppWebhookController extends Controller
         }
 
         $packageCode = trim($parts[1]);
-        // Nama bisa mengandung # jadi gabungkan sisa parts
-        $requesterName = trim(implode(' ', array_slice(array_map('trim', explode('#', $messageBody)), 2)));
+        // Nama jika diisi setelah pemisah kedua
+        $rawParts = explode('#', $messageBody);
+        $requesterName = count($rawParts) >= 3 
+            ? trim(implode(' ', array_slice(array_map('trim', $rawParts), 2))) 
+            : ($senderName ?: 'Pengunjung');
+
         if (empty($requesterName)) {
             $requesterName = 'Pengunjung';
         }

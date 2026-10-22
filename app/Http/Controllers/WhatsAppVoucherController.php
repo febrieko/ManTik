@@ -76,6 +76,8 @@ class WhatsAppVoucherController extends Controller
         $settings = [
             'api_url'        => config('whatsapp.api_url'),
             'api_key_set'    => !empty(config('whatsapp.api_key')),
+            'gateway_type'   => config('whatsapp.gateway_type', 'auto'),
+            'session'        => config('whatsapp.session', 'default'),
             'webhook_secret' => config('whatsapp.webhook_secret'),
             'admin_phone'    => config('whatsapp.admin_phone'),
         ];
@@ -100,6 +102,8 @@ class WhatsAppVoucherController extends Controller
         $validated = $request->validate([
             'api_url'        => 'required|url',
             'api_key'        => 'nullable|string|max:255',
+            'gateway_type'   => 'nullable|string|in:auto,openwa,fonnte',
+            'session'        => 'nullable|string|max:100',
             'webhook_secret' => 'nullable|string|max:100',
             'admin_phone'    => 'nullable|string|max:20',
         ]);
@@ -109,6 +113,8 @@ class WhatsAppVoucherController extends Controller
 
         $replacements = [
             'WHATSAPP_API_URL'        => $validated['api_url'],
+            'WHATSAPP_GATEWAY_TYPE'   => $validated['gateway_type'] ?? 'auto',
+            'WHATSAPP_SESSION'        => $validated['session'] ?? 'default',
             'WHATSAPP_WEBHOOK_SECRET' => $validated['webhook_secret'] ?? '',
             'WHATSAPP_ADMIN_PHONE'    => $validated['admin_phone'] ?? '',
         ];

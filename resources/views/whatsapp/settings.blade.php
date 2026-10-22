@@ -34,17 +34,50 @@
             <div class="card-header">
                 <h3 style="margin:0;font-size:16px;">⚙️ Konfigurasi API Gateway</h3>
             </div>
-            <div style="padding:24px;">
+                <div style="background:rgba(37,211,102,0.08);border:1px solid rgba(37,211,102,0.25);border-radius:10px;padding:14px;margin-bottom:20px;">
+                    <div style="font-weight:600;font-size:13px;color:#25d366;margin-bottom:8px;">⚡ Preset Cepat:</div>
+                    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                        <button type="button" class="btn btn-sm" style="background:#25d366;color:#000;font-weight:600;" onclick="applyPreset('openwa_mitrapedia')">
+                            🌐 OpenWA (wa.mitrapedia.my.id)
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="applyPreset('fonnte')">
+                            💬 Fonnte (api.fonnte.com)
+                        </button>
+                    </div>
+                </div>
+
                 <form action="{{ route('whatsapp.settings.update') }}" method="POST">
                     @csrf
 
                     <div class="form-group">
-                        <label class="form-label">URL Endpoint API <span style="color:#ef4444;">*</span></label>
-                        <input type="url" name="api_url" class="form-control @error('api_url') is-invalid @enderror"
-                            value="{{ old('api_url', $settings['api_url']) }}"
-                            placeholder="https://api.yourgatewayprovider.com/send" required>
+                        <label class="form-label">Tipe Gateway WhatsApp</label>
+                        <select name="gateway_type" id="gateway_type" class="form-control" onchange="toggleGatewayFields()">
+                            <option value="auto" {{ ($settings['gateway_type'] ?? 'auto') === 'auto' ? 'selected' : '' }}>🔄 Otomatis (Auto-Detect)</option>
+                            <option value="openwa" {{ ($settings['gateway_type'] ?? '') === 'openwa' ? 'selected' : '' }}>🟢 OpenWA Gateway (REST API / Dashboard)</option>
+                            <option value="fonnte" {{ ($settings['gateway_type'] ?? '') === 'fonnte' ? 'selected' : '' }}>🔵 Fonnte / Standard Gateway</option>
+                        </select>
                         <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
-                            URL endpoint untuk mengirim pesan. Contoh: <code>https://api.fonnte.com/send</code>
+                            Pilih <strong>OpenWA Gateway</strong> jika menggunakan <code>wa.mitrapedia.my.id</code>.
+                        </small>
+                    </div>
+
+                    <div class="form-group" id="session-group">
+                        <label class="form-label">Nama Session OpenWA</label>
+                        <input type="text" name="session" id="session_name" class="form-control"
+                            value="{{ old('session', $settings['session'] ?? 'default') }}"
+                            placeholder="default">
+                        <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                            Nama session yang terhubung/di-scan QR di OpenWA Anda (contoh: <code>default</code>).
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label class="form-label">URL Endpoint API <span style="color:#ef4444;">*</span></label>
+                        <input type="url" name="api_url" id="api_url" class="form-control @error('api_url') is-invalid @enderror"
+                            value="{{ old('api_url', $settings['api_url']) }}"
+                            placeholder="https://wa.mitrapedia.my.id/api/sessions/default/messages/send-text" required>
+                        <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;" id="url-help">
+                            Untuk OpenWA: <code>https://wa.mitrapedia.my.id/api/sessions/default/messages/send-text</code> (atau cukup domain <code>https://wa.mitrapedia.my.id</code>)
                         </small>
                         @error('api_url') <div class="invalid-feedback">{{ $message }}</div> @enderror
                     </div>
@@ -52,7 +85,7 @@
                     <div class="form-group">
                         <label class="form-label">API Key / Token</label>
                         <input type="password" name="api_key" class="form-control" autocomplete="new-password"
-                            placeholder="{{ $settings['api_key_set'] ? '••••••••••••••• (sudah dikonfigurasi)' : 'Masukkan API key...' }}">
+                            placeholder="{{ $settings['api_key_set'] ? '••••••••••••••• (sudah dikonfigurasi)' : 'Masukkan API key OpenWA...' }}">
                         <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
                             Status: 
                             @if($settings['api_key_set'])
@@ -60,17 +93,17 @@
                             @else
                                 <span style="color:#ef4444;">✗ Belum dikonfigurasi</span>
                             @endif
-                            &mdash; Kosongkan jika tidak ingin mengubah.
+                            &mdash; Diperoleh dari dashboard OpenWA menu <strong>API Keys</strong>.
                         </small>
                     </div>
 
                     <div class="form-group">
-                        <label class="form-label">Webhook Secret</label>
+                        <label class="form-label">Webhook Secret (Opsional)</label>
                         <input type="text" name="webhook_secret" class="form-control"
                             value="{{ old('webhook_secret', $settings['webhook_secret']) }}"
                             placeholder="my-secret-key-123">
                         <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
-                            Token rahasia untuk memverifikasi bahwa webhook berasal dari gateway Anda. Kosongkan untuk menonaktifkan validasi.
+                            Token rahasia untuk memverifikasi webhook yang masuk. Kosongkan jika tidak memakai secret.
                         </small>
                     </div>
 
@@ -80,7 +113,7 @@
                             value="{{ old('admin_phone', $settings['admin_phone']) }}"
                             placeholder="6281234567890">
                         <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
-                            Nomor yang akan menerima notifikasi setiap ada voucher yang diminta. Format: 628xxxxxxxxx. Kosongkan untuk menonaktifkan.
+                            Nomor untuk menerima notifikasi pesan/voucher. Format: 628xxxxxxxxx.
                         </small>
                     </div>
 
@@ -137,7 +170,7 @@
                     </div>
                 </div>
 
-                <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:14px;">
+                <div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.2);border-radius:8px;padding:14px;margin-bottom:16px;">
                     <div style="font-size:13px;font-weight:600;color:#f59e0b;margin-bottom:8px;">📋 Format Pesan Pengunjung</div>
                     <div style="font-family:monospace;font-size:14px;color:var(--text-primary);margin-bottom:8px;">
                         <code>VOUCHER#KODE_PAKET#NAMA_ANDA</code>
@@ -147,6 +180,18 @@
                     <div style="font-size:12px;color:var(--text-muted);">
                         Ketik <code>INFO</code> atau <code>PAKET</code> untuk melihat daftar paket yang tersedia.
                     </div>
+                </div>
+
+                {{-- Panduan Khusus OpenWA --}}
+                <div style="background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.2);border-radius:8px;padding:14px;">
+                    <div style="font-size:13px;font-weight:600;color:#00d4ff;margin-bottom:8px;">📘 Panduan OpenWA (wa.mitrapedia.my.id):</div>
+                    <ol style="font-size:12px;color:var(--text-secondary);padding-left:18px;margin:0;display:flex;flex-direction:column;gap:6px;">
+                        <li>Buka dashboard <strong><a href="https://wa.mitrapedia.my.id" target="_blank" style="color:#00d4ff;">wa.mitrapedia.my.id</a></strong>.</li>
+                        <li>Buka menu <strong>Sessions</strong>, pastikan session Anda aktif (Scan QR). Ingat nama session tersebut (default: <code>default</code>).</li>
+                        <li>Buka menu <strong>API Keys</strong>, buat/salin API Key lalu tempel di form sebelah kiri.</li>
+                        <li>Buka menu <strong>Webhooks</strong> di dashboard OpenWA, tambahkan Webhook baru mengarah ke URL Webhook di atas dengan event <code>message</code>.</li>
+                        <li>Klik <strong>Simpan Pengaturan</strong> lalu lakukan <strong>Test Koneksi</strong>.</li>
+                    </ol>
                 </div>
             </div>
         </div>
@@ -226,5 +271,31 @@ function copyWebhookUrl() {
         alert('URL Webhook berhasil disalin!');
     });
 }
+
+function applyPreset(type) {
+    const sessionVal = document.getElementById('session_name').value || 'default';
+    if (type === 'openwa_mitrapedia') {
+        document.getElementById('gateway_type').value = 'openwa';
+        document.getElementById('api_url').value = 'https://wa.mitrapedia.my.id/api/sessions/' + sessionVal + '/messages/send-text';
+        document.getElementById('session_name').value = sessionVal;
+        toggleGatewayFields();
+    } else if (type === 'fonnte') {
+        document.getElementById('gateway_type').value = 'fonnte';
+        document.getElementById('api_url').value = 'https://api.fonnte.com/send';
+        toggleGatewayFields();
+    }
+}
+
+function toggleGatewayFields() {
+    const type = document.getElementById('gateway_type').value;
+    const sessionGroup = document.getElementById('session-group');
+    if (type === 'fonnte') {
+        sessionGroup.style.display = 'none';
+    } else {
+        sessionGroup.style.display = 'block';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', toggleGatewayFields);
 </script>
 @endpush

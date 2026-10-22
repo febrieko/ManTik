@@ -21,6 +21,12 @@ return [
     // API Key / Token untuk autentikasi ke gateway
     'api_key' => env('WHATSAPP_API_KEY', ''),
 
+    // Provider / Gateway Type: 'auto', 'openwa', atau 'fonnte'
+    'gateway_type' => env('WHATSAPP_GATEWAY_TYPE', 'auto'),
+
+    // Session name (khusus OpenWA, misal: default)
+    'session' => env('WHATSAPP_SESSION', 'default'),
+
     // Secret token untuk memvalidasi webhook yang masuk dari gateway
     // Kosongkan jika tidak menggunakan validasi secret
     'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET', ''),

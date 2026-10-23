@@ -40,6 +40,18 @@ class HotspotController extends Controller
         return view('hotspot.index', compact('hotspotUsers', 'routers', 'routerId'));
     }
 
+    /**
+     * Fallback method show untuk kompatibilitas route cache jika server masih mengarahkan /hotspot/vouchers ke show.
+     */
+    public function show($id, Request $request)
+    {
+        if ($id === 'vouchers') {
+            return $this->vouchers($request);
+        }
+
+        return redirect()->route('hotspot.index');
+    }
+
     public function create()
     {
         $routers = Router::where('is_active', true)->get();

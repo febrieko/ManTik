@@ -78,21 +78,45 @@ class WhatsAppWebhookController extends Controller
         $senderPhone = null;
         $senderName  = null;
         $messageBody = null;
+        $rawChatId   = null;
 
         if (is_array($payload) && !empty($payload)) {
-            $senderPhone = $payload['from'] ?? $payload['sender']['id'] ?? $payload['chatId'] ?? null;
+            $rawChatId   = $payload['from'] ?? $payload['chatId'] ?? $payload['sender']['id'] ?? null;
             $messageBody = $payload['body'] ?? $payload['text'] ?? $payload['message'] ?? null;
-            $senderName  = $payload['sender']['pushname'] ?? $payload['sender']['name'] ?? null;
+            $senderName  = $payload['sender']['pushname'] ?? $payload['sender']['name'] ?? $payload['pushname'] ?? $payload['name'] ?? null;
+
+            // Prioritaskan nomor HP asli dari sender
+            $senderPhone = $payload['sender']['number']
+                ?? $payload['sender']['formattedPhone']
+                ?? $payload['sender']['phoneNumber']
+                ?? $payload['author']
+                ?? $payload['sender']['phone']
+                ?? null;
+
+            // Jika senderPhone masih kosong atau berformat LID (@lid), cari yang berformat nomor biasa
+            if (!$senderPhone || str_contains((string)$senderPhone, '@lid')) {
+                if (!empty($payload['author']) && !str_contains($payload['author'], '@lid')) {
+                    $senderPhone = $payload['author'];
+                } elseif (!empty($payload['from']) && !str_contains($payload['from'], '@lid')) {
+                    $senderPhone = $payload['from'];
+                } elseif (!empty($payload['chatId']) && !str_contains($payload['chatId'], '@lid')) {
+                    $senderPhone = $payload['chatId'];
+                }
+            }
         }
 
         if (!$senderPhone) {
             $senderRaw = $request->input('sender');
             if (is_array($senderRaw)) {
-                $senderPhone = $senderRaw['id'] ?? $senderRaw['phone'] ?? null;
-                $senderName  = $senderRaw['pushname'] ?? $senderRaw['name'] ?? null;
+                $senderPhone = $senderRaw['number'] ?? $senderRaw['formattedPhone'] ?? $senderRaw['phoneNumber'] ?? $senderRaw['phone'] ?? $senderRaw['id'] ?? null;
+                $senderName  = $senderName ?: ($senderRaw['pushname'] ?? $senderRaw['name'] ?? null);
             } else {
                 $senderPhone = $senderRaw ?? $request->input('from') ?? $request->input('phone');
             }
+        }
+
+        if (!$senderPhone && $rawChatId) {
+            $senderPhone = $rawChatId;
         }
 
         if (empty($messageBody)) {
@@ -106,17 +130,20 @@ class WhatsAppWebhookController extends Controller
         }
 
         $phone = $this->wa->normalizePhone($senderPhone);
+        if (empty($phone) && $rawChatId) {
+            $phone = preg_replace('/\D/', '', $rawChatId);
+        }
 
-        Log::info('[WA Webhook] Pesan masuk dari ' . $phone . ': ' . $messageBody);
+        Log::info('[WA Webhook] Pesan masuk dari ' . $phone . ' (rawChatId: ' . $rawChatId . '): ' . $messageBody);
 
         // Cek pesan langsung seperti INFO, PAKET, atau FREE/GRATIS
         $bodyUpper = strtoupper($messageBody);
         if ($bodyUpper === 'INFO' || $bodyUpper === 'PAKET') {
-            return $this->handleInfoRequest($phone);
+            return $this->handleInfoRequest($phone, $rawChatId);
         }
 
         if ($bodyUpper === 'FREE' || $bodyUpper === 'GRATIS') {
-            return $this->processVoucherRequest($phone, 'FREE', $senderName ?: 'Pengunjung', null);
+            return $this->processVoucherRequest($phone, 'FREE', $senderName ?: 'Pengunjung', null, $rawChatId);
         }
 
         // Parse format diawali VOUCHER
@@ -126,7 +153,7 @@ class WhatsAppWebhookController extends Controller
         if (count($parts) < 2 || trim($parts[0]) !== 'VOUCHER') {
             // Pesan tidak dikenali, kirim petunjuk
             $availablePackages = $this->getAvailablePackagesFormatted();
-            $this->wa->sendErrorMessage($phone, 'Format pesan tidak valid.', $availablePackages);
+            $this->wa->sendErrorMessage($phone, 'Format pesan tidak valid.', $availablePackages, null, $rawChatId);
             return response()->json(['status' => 'invalid_format']);
         }
 
@@ -169,13 +196,13 @@ class WhatsAppWebhookController extends Controller
             $requesterName = 'Pengunjung';
         }
 
-        return $this->processVoucherRequest($phone, $packageCode, $requesterName, $routerQuery);
+        return $this->processVoucherRequest($phone, $packageCode, $requesterName, $routerQuery, $rawChatId);
     }
 
     /**
      * Handle permintaan INFO paket.
      */
-    protected function handleInfoRequest(string $phone)
+    protected function handleInfoRequest(string $phone, ?string $rawChatId = null)
     {
         $packages = Package::where('type', 'hotspot')
             ->where('is_active', true)
@@ -183,7 +210,7 @@ class WhatsAppWebhookController extends Controller
             ->get();
 
         if ($packages->isEmpty()) {
-            $this->wa->sendMessage($phone, "❌ Maaf, saat ini tidak ada paket hotspot yang tersedia. Silakan hubungi admin.");
+            $this->wa->sendMessage($phone, "❌ Maaf, saat ini tidak ada paket hotspot yang tersedia. Silakan hubungi admin.", $rawChatId);
             return response()->json(['status' => 'no_packages']);
         }
 
@@ -202,14 +229,14 @@ class WhatsAppWebhookController extends Controller
             ];
         })->toArray();
 
-        $this->wa->sendPackageMenu($phone, $packageList);
+        $this->wa->sendPackageMenu($phone, $packageList, null, $rawChatId);
         return response()->json(['status' => 'menu_sent']);
     }
 
     /**
      * Proses permintaan voucher dari pengunjung / non-pelanggan.
      */
-    protected function processVoucherRequest(string $phone, string $packageCode, string $requesterName, ?string $routerQuery = null)
+    protected function processVoucherRequest(string $phone, string $packageCode, string $requesterName, ?string $routerQuery = null, ?string $rawChatId = null)
     {
         // 1. Tentukan Router jika routerQuery disertakan (misal SSID atau nama router)
         $targetRouter = null;
@@ -227,7 +254,8 @@ class WhatsAppWebhookController extends Controller
             if (!$targetRouter) {
                 $this->wa->sendMessage(
                     $phone,
-                    "❌ *Lokasi WiFi / Router Tidak Ditemukan*\n\nTidak ditemukan WiFi hotspot dengan nama/kode *{$routerQuery}*.\n\nSilakan periksa nama WiFi yang tertera pada banner lokasi Anda atau ketik *PAKET*."
+                    "❌ *Lokasi WiFi / Router Tidak Ditemukan*\n\nTidak ditemukan WiFi hotspot dengan nama/kode *{$routerQuery}*.\n\nSilakan periksa nama WiFi yang tertera pada banner lokasi Anda atau ketik *PAKET*.",
+                    $rawChatId
                 );
                 return response()->json(['status' => 'router_not_found']);
             }
@@ -287,7 +315,9 @@ class WhatsAppWebhookController extends Controller
             $this->wa->sendErrorMessage(
                 $phone,
                 "Paket *{$packageCode}* tidak ditemukan.",
-                $availablePackages
+                $availablePackages,
+                null,
+                $rawChatId
             );
 
             // Log request gagal
@@ -337,7 +367,8 @@ class WhatsAppWebhookController extends Controller
             if ($claimedToday) {
                 $this->wa->sendMessage(
                     $phone,
-                    "⏳ *Batas Voucher Gratis Harian*\n\nNomor WhatsApp Anda ({$phone}) sudah mengklaim 1 voucher gratis hari ini.\n\nSetiap nomor hanya berhak mendapatkan *1 voucher gratis dalam satu hari*.\nSilakan coba lagi besok! 🙏"
+                    "⏳ *Batas Voucher Gratis Harian*\n\nNomor WhatsApp Anda ({$phone}) sudah mengklaim 1 voucher gratis hari ini.\n\nSetiap nomor hanya berhak mendapatkan *1 voucher gratis dalam satu hari*.\nSilakan coba lagi besok! 🙏",
+                    $rawChatId
                 );
                 return response()->json(['status' => 'daily_limit_reached']);
             }
@@ -351,7 +382,8 @@ class WhatsAppWebhookController extends Controller
             if ($recentRequest) {
                 $this->wa->sendMessage(
                     $phone,
-                    "⏳ *Permintaan Terlalu Sering*\n\nAnda baru saja mendapatkan voucher. Harap tunggu minimal 1 jam sebelum meminta voucher baru.\n\nHubungi admin jika ada masalah."
+                    "⏳ *Permintaan Terlalu Sering*\n\nAnda baru saja mendapatkan voucher. Harap tunggu minimal 1 jam sebelum meminta voucher baru.\n\nHubungi admin jika ada masalah.",
+                    $rawChatId
                 );
                 return response()->json(['status' => 'rate_limited']);
             }
@@ -378,7 +410,8 @@ class WhatsAppWebhookController extends Controller
             $locationInfo = $targetRouter ? " untuk WiFi *{$targetRouter->ssid}*" : "";
             $this->wa->sendMessage(
                 $phone,
-                "❌ *Voucher Tidak Tersedia*\n\nMaaf, stok voucher untuk paket *{$package->name}*{$locationInfo} sedang habis.\n\nSilakan coba paket lain atau hubungi admin kami."
+                "❌ *Voucher Tidak Tersedia*\n\nMaaf, stok voucher untuk paket *{$package->name}*{$locationInfo} sedang habis.\n\nSilakan coba paket lain atau hubungi admin kami.",
+                $rawChatId
             );
 
             WaVoucherRequest::create([
@@ -429,7 +462,8 @@ class WhatsAppWebhookController extends Controller
 
             $this->wa->sendMessage(
                 $phone,
-                "❌ Terjadi kesalahan sistem. Silakan coba lagi atau hubungi admin."
+                "❌ Terjadi kesalahan sistem. Silakan coba lagi atau hubungi admin.",
+                $rawChatId
             );
 
             return response()->json(['status' => 'error', 'message' => $e->getMessage()]);
@@ -457,7 +491,7 @@ class WhatsAppWebhookController extends Controller
             'router_name'  => $router?->name,
             'ssid'         => $ssid,
             'brand_name'   => $brandName,
-        ]);
+        ], $rawChatId);
 
         // Kirim notifikasi ke admin (jika dikonfigurasi)
         $adminPhone = Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone');
@@ -467,6 +501,8 @@ class WhatsAppWebhookController extends Controller
                 'phone'          => $phone,
                 'package_name'   => $package->name,
                 'voucher_code'   => $voucher->code,
+                'ssid'           => $ssid,
+                'router_name'    => $router?->name,
             ]);
         }
 

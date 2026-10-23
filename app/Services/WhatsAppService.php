@@ -128,9 +128,9 @@ class WhatsAppService
     }
 
     /**
-     * Kirim pesan WhatsApp ke nomor tertentu.
+     * Kirim pesan WhatsApp ke nomor atau chatId tertentu.
      */
-    public function sendMessage(string $to, string $message): array
+    public function sendMessage(string $to, string $message, ?string $targetChatId = null): array
     {
         // Normalisasi nomor telepon (hilangkan karakter non-digit, tambah 62 jika perlu)
         $phone = $this->normalizePhone($to);
@@ -138,7 +138,18 @@ class WhatsAppService
 
         try {
             if ($this->isOpenWa()) {
-                $chatId = str_ends_with($phone, '@c.us') ? $phone : "{$phone}@c.us";
+                // Tentukan chatId OpenWA yang tepat:
+                // 1. Jika targetChatId disediakan (misal format @lid atau @c.us dari webhook)
+                // 2. Jika $to sendiri sudah mengandung @lid atau @c.us
+                // 3. Fallback standar ke {phone}@c.us
+                if (!empty($targetChatId) && (str_contains($targetChatId, '@lid') || str_contains($targetChatId, '@c.us') || str_contains($targetChatId, '@s.whatsapp.net'))) {
+                    $chatId = $targetChatId;
+                } elseif (str_contains($to, '@lid') || str_contains($to, '@c.us') || str_contains($to, '@s.whatsapp.net')) {
+                    $chatId = $to;
+                } else {
+                    $chatId = str_ends_with($phone, '@c.us') ? $phone : "{$phone}@c.us";
+                }
+
                 $response = Http::timeout(15)
                     ->withHeaders([
                         'X-API-Key'    => $this->apiKey,
@@ -149,6 +160,26 @@ class WhatsAppService
                         'chatId' => $chatId,
                         'text'   => $message,
                     ]);
+
+                // Jika pengiriman ke chatId awal gagal dan kita memiliki alternatif nomor telepon (misal @lid gagal, coba @c.us atau sebaliknya)
+                if (!$response->successful() && !empty($phone) && !str_ends_with($chatId, "{$phone}@c.us")) {
+                    $altChatId = "{$phone}@c.us";
+                    Log::info("[WhatsApp] Mencoba kirim ulang ke chatId alternatif: {$altChatId}");
+                    $retryResponse = Http::timeout(15)
+                        ->withHeaders([
+                            'X-API-Key'    => $this->apiKey,
+                            'Content-Type' => 'application/json',
+                            'Accept'       => 'application/json',
+                        ])
+                        ->post($endpoint, [
+                            'chatId' => $altChatId,
+                            'text'   => $message,
+                        ]);
+
+                    if ($retryResponse->successful()) {
+                        $response = $retryResponse;
+                    }
+                }
             } else {
                 $response = Http::timeout(15)
                     ->withHeaders([
@@ -171,7 +202,7 @@ class WhatsAppService
                     : ('HTTP ' . $response->status());
             }
 
-            Log::info('[WhatsApp] Pesan diproses ke ' . $phone, [
+            Log::info('[WhatsApp] Pesan diproses ke ' . ($phone ?: $to), [
                 'status'   => $response->status(),
                 'success'  => $success,
                 'endpoint' => $endpoint,
@@ -180,16 +211,16 @@ class WhatsAppService
 
             return [
                 'success'  => $success,
-                'phone'    => $phone,
+                'phone'    => $phone ?: $to,
                 'response' => $body,
                 'error'    => $errorMessage,
             ];
         } catch (\Exception $e) {
-            Log::error('[WhatsApp] Gagal kirim pesan ke ' . $phone . ': ' . $e->getMessage());
+            Log::error('[WhatsApp] Gagal kirim pesan ke ' . ($phone ?: $to) . ': ' . $e->getMessage());
 
             return [
                 'success' => false,
-                'phone'   => $phone,
+                'phone'   => $phone ?: $to,
                 'error'   => $e->getMessage(),
             ];
         }
@@ -198,10 +229,10 @@ class WhatsAppService
     /**
      * Kirim voucher hotspot ke pengunjung.
      */
-    public function sendVoucher(string $to, array $voucherData): array
+    public function sendVoucher(string $to, array $voucherData, ?string $targetChatId = null): array
     {
         $message = $this->buildVoucherMessage($voucherData);
-        return $this->sendMessage($to, $message);
+        return $this->sendMessage($to, $message, $targetChatId);
     }
 
     /**
@@ -216,7 +247,7 @@ class WhatsAppService
     /**
      * Kirim pesan error/tidak valid ke pengunjung.
      */
-    public function sendErrorMessage(string $to, string $reason, ?array $availablePackages = null, ?string $brandName = null): array
+    public function sendErrorMessage(string $to, string $reason, ?array $availablePackages = null, ?string $brandName = null, ?string $targetChatId = null): array
     {
         $brand = $brandName ?: Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
 
@@ -240,13 +271,13 @@ class WhatsAppService
 
         $message .= "\nHubungi admin jika ada pertanyaan.";
 
-        return $this->sendMessage($to, $message);
+        return $this->sendMessage($to, $message, $targetChatId);
     }
 
     /**
      * Kirim menu daftar paket ke pengunjung.
      */
-    public function sendPackageMenu(string $to, array $packages, ?string $brandName = null): array
+    public function sendPackageMenu(string $to, array $packages, ?string $brandName = null, ?string $targetChatId = null): array
     {
         $brand = $brandName ?: Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
 
@@ -272,7 +303,7 @@ class WhatsAppService
         $message .= "Atau untuk WiFi/lokasi spesifik:\n";
         $message .= "Ketik: `VOUCHER#SSID#KODE_PAKET#NAMA`";
 
-        return $this->sendMessage($to, $message);
+        return $this->sendMessage($to, $message, $targetChatId);
     }
 
     /**
@@ -323,15 +354,19 @@ class WhatsAppService
      */
     protected function buildAdminNotificationMessage(array $data): string
     {
-        $message  = "🔔 *Permintaan Voucher Baru*\n";
+        $ssidInfo = !empty($data['ssid']) ? $data['ssid'] : (!empty($data['router_name']) ? $data['router_name'] : '-');
+        $phoneDisplay = !empty($data['phone']) ? $data['phone'] : '-';
+
+        $message  = "🔔 *Notifikasi Admin: Permintaan Voucher Baru*\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
-        $message .= "👤 Nama: {$data['requester_name']}\n";
-        $message .= "📱 No. WA: {$data['phone']}\n";
-        $message .= "📦 Paket: {$data['package_name']}\n";
-        $message .= "🎟 Voucher: {$data['voucher_code']}\n";
-        $message .= "⏰ Waktu: " . now()->locale('id')->isoFormat('D MMM YYYY, HH:mm') . "\n";
+        $message .= "👤 *Nama*: {$data['requester_name']}\n";
+        $message .= "📱 *No. WA*: {$phoneDisplay}\n";
+        $message .= "📦 *Paket*: {$data['package_name']}\n";
+        $message .= "🎟 *Voucher*: `{$data['voucher_code']}`\n";
+        $message .= "📡 *WiFi / SSID*: *{$ssidInfo}*\n";
+        $message .= "⏰ *Waktu*: " . now()->locale('id')->isoFormat('D MMM YYYY, HH:mm') . "\n";
         $message .= "━━━━━━━━━━━━━━━━━━━━\n";
-        $message .= "✅ Voucher telah dikirim otomatis.";
+        $message .= "ℹ️ _Pesan ini adalah laporan untuk Admin. Rincian voucher lengkap beserta panduan login hotspot telah dikirimkan otomatis ke nomor WhatsApp pengunjung._";
 
         return $message;
     }

@@ -15,10 +15,18 @@ class WhatsAppService
 
     public function __construct()
     {
-        $this->apiUrl      = (string) config('whatsapp.api_url', '');
-        $this->apiKey      = (string) config('whatsapp.api_key', '');
-        $this->gatewayType = (string) config('whatsapp.gateway_type', 'auto');
-        $this->session     = (string) config('whatsapp.session', 'default');
+        $this->loadConfiguration();
+    }
+
+    /**
+     * Muat konfigurasi dari database Setting (prioritas utama) atau config .env (fallback).
+     */
+    public function loadConfiguration(): void
+    {
+        $this->apiUrl      = (string) (Setting::get('whatsapp_api_url') ?: config('whatsapp.api_url', ''));
+        $this->apiKey      = (string) (Setting::get('whatsapp_api_key') ?: config('whatsapp.api_key', ''));
+        $this->gatewayType = (string) (Setting::get('whatsapp_gateway_type') ?: config('whatsapp.gateway_type', 'auto'));
+        $this->session     = (string) (Setting::get('whatsapp_session') ?: config('whatsapp.session', 'default'));
     }
 
     /**

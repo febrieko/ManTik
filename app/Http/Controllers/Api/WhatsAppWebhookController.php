@@ -38,7 +38,7 @@ class WhatsAppWebhookController extends Controller
     public function incoming(Request $request)
     {
         // Validasi webhook secret jika dikonfigurasi
-        $webhookSecret = config('whatsapp.webhook_secret');
+        $webhookSecret = Setting::get('whatsapp_webhook_secret') ?: config('whatsapp.webhook_secret');
         if ($webhookSecret) {
             $receivedSecret = $request->header('X-Webhook-Secret') ?? $request->get('secret');
             if ($receivedSecret !== $webhookSecret) {
@@ -336,7 +336,7 @@ class WhatsAppWebhookController extends Controller
         ]);
 
         // Kirim notifikasi ke admin (jika dikonfigurasi)
-        $adminPhone = config('whatsapp.admin_phone');
+        $adminPhone = Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone');
         if ($adminPhone) {
             $this->wa->sendAdminNotification($adminPhone, [
                 'requester_name' => $requesterName,

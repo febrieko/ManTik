@@ -75,12 +75,12 @@ class WhatsAppVoucherController extends Controller
     public function settings()
     {
         $settings = [
-            'api_url'        => config('whatsapp.api_url'),
-            'api_key_set'    => !empty(config('whatsapp.api_key')),
-            'gateway_type'   => config('whatsapp.gateway_type', 'auto'),
-            'session'        => config('whatsapp.session', 'default'),
-            'webhook_secret' => config('whatsapp.webhook_secret'),
-            'admin_phone'    => config('whatsapp.admin_phone'),
+            'api_url'        => Setting::get('whatsapp_api_url') ?: config('whatsapp.api_url'),
+            'api_key_set'    => !empty(Setting::get('whatsapp_api_key')) || !empty(config('whatsapp.api_key')),
+            'gateway_type'   => Setting::get('whatsapp_gateway_type') ?: config('whatsapp.gateway_type', 'auto'),
+            'session'        => Setting::get('whatsapp_session') ?: config('whatsapp.session', 'default'),
+            'webhook_secret' => Setting::get('whatsapp_webhook_secret') ?: config('whatsapp.webhook_secret'),
+            'admin_phone'    => Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone'),
             'brand_name'     => Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot')),
         ];
 
@@ -97,10 +97,15 @@ class WhatsAppVoucherController extends Controller
     }
 
     /**
-     * Update pengaturan WhatsApp Gateway di .env.
+     * Update pengaturan WhatsApp Gateway (tersimpan ke database Setting & sinkron ke .env).
      */
     public function updateSettings(Request $request)
     {
+        // Auto prefix https:// jika user menginputkan domain tanpa protokol
+        if ($request->filled('api_url') && !preg_match('~^https?://~i', $request->api_url)) {
+            $request->merge(['api_url' => 'https://' . $request->api_url]);
+        }
+
         $validated = $request->validate([
             'api_url'        => 'required|url',
             'api_key'        => 'nullable|string|max:255',
@@ -111,39 +116,59 @@ class WhatsAppVoucherController extends Controller
             'brand_name'     => 'nullable|string|max:100',
         ]);
 
-        if (isset($validated['brand_name'])) {
-            Setting::set('hotspot_brand_name', trim($validated['brand_name']), 'hotspot');
-        }
-
-        $envPath = base_path('.env');
-        $content = file_get_contents($envPath);
-
         $adminPhone = !empty($validated['admin_phone'])
             ? $this->wa->normalizePhone($validated['admin_phone'])
             : '';
 
-        $replacements = [
-            'WHATSAPP_API_URL'        => $validated['api_url'],
-            'WHATSAPP_GATEWAY_TYPE'   => $validated['gateway_type'] ?? 'auto',
-            'WHATSAPP_SESSION'        => $validated['session'] ?? 'default',
-            'WHATSAPP_WEBHOOK_SECRET' => $validated['webhook_secret'] ?? '',
-            'WHATSAPP_ADMIN_PHONE'    => $adminPhone,
-        ];
+        // 1. Simpan ke database via model Setting (solusi permanen untuk aaPanel / config:cache)
+        Setting::set('whatsapp_api_url', trim($validated['api_url']), 'whatsapp');
+        Setting::set('whatsapp_gateway_type', $validated['gateway_type'] ?? 'auto', 'whatsapp');
+        Setting::set('whatsapp_session', trim($validated['session'] ?? 'default'), 'whatsapp');
+        Setting::set('whatsapp_webhook_secret', trim($validated['webhook_secret'] ?? ''), 'whatsapp');
+        Setting::set('whatsapp_admin_phone', $adminPhone, 'whatsapp');
 
-        // Hanya update API key jika diisi (biar tidak overwrite dengan kosong)
         if (!empty($validated['api_key'])) {
-            $replacements['WHATSAPP_API_KEY'] = $validated['api_key'];
+            Setting::set('whatsapp_api_key', trim($validated['api_key']), 'whatsapp');
         }
 
-        foreach ($replacements as $key => $value) {
-            if (preg_match("/^{$key}=.*/m", $content)) {
-                $content = preg_replace("/^{$key}=.*/m", "{$key}={$value}", $content);
-            } else {
-                $content .= "\n{$key}={$value}";
+        if (isset($validated['brand_name'])) {
+            Setting::set('hotspot_brand_name', trim($validated['brand_name']), 'hotspot');
+        }
+
+        // Muat ulang konfigurasi di WhatsAppService
+        $this->wa->loadConfiguration();
+
+        // 2. Coba sinkronisasi ke file .env (aman bila permission server aaPanel dibatasi)
+        try {
+            $envPath = base_path('.env');
+            if (file_exists($envPath) && is_writable($envPath)) {
+                $content = file_get_contents($envPath);
+
+                $replacements = [
+                    'WHATSAPP_API_URL'        => $validated['api_url'],
+                    'WHATSAPP_GATEWAY_TYPE'   => $validated['gateway_type'] ?? 'auto',
+                    'WHATSAPP_SESSION'        => $validated['session'] ?? 'default',
+                    'WHATSAPP_WEBHOOK_SECRET' => $validated['webhook_secret'] ?? '',
+                    'WHATSAPP_ADMIN_PHONE'    => $adminPhone,
+                ];
+
+                if (!empty($validated['api_key'])) {
+                    $replacements['WHATSAPP_API_KEY'] = $validated['api_key'];
+                }
+
+                foreach ($replacements as $key => $value) {
+                    if (preg_match("/^{$key}=.*/m", $content)) {
+                        $content = preg_replace("/^{$key}=.*/m", "{$key}={$value}", $content);
+                    } else {
+                        $content .= "\n{$key}={$value}";
+                    }
+                }
+
+                @file_put_contents($envPath, $content);
             }
+        } catch (\Throwable $e) {
+            Log::warning('[WhatsApp] Gagal sinkronisasi file .env: ' . $e->getMessage());
         }
-
-        file_put_contents($envPath, $content);
 
         return back()->with('success', 'Pengaturan WhatsApp Gateway berhasil disimpan.');
     }

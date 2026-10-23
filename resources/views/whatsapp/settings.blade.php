@@ -25,6 +25,16 @@
 @if(session('error'))
 <div class="alert alert-danger mb-24">❌ {{ session('error') }}</div>
 @endif
+@if ($errors->any())
+<div class="alert alert-danger mb-24">
+    <strong>⚠️ Gagal menyimpan pengaturan:</strong>
+    <ul style="margin:8px 0 0 20px;padding:0;">
+        @foreach ($errors->all() as $error)
+            <li>{{ $error }}</li>
+        @endforeach
+    </ul>
+</div>
+@endif
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;">
 

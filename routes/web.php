@@ -52,33 +52,35 @@ Route::middleware(['auth'])->group(function () {
     // PPPOE MANAGEMENT
     // ============================================
     Route::middleware(['can:view pppoe', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        Route::resource('pppoe', PppoeController::class);
+        Route::post('/pppoe/sync-router/{router}', [PppoeController::class, 'syncFromRouter'])->name('pppoe.sync-router');
         Route::post('/pppoe/{pppoeUser}/toggle', [PppoeController::class, 'toggle'])->name('pppoe.toggle');
         Route::post('/pppoe/{pppoeUser}/sync', [PppoeController::class, 'sync'])->name('pppoe.sync');
-        Route::post('/pppoe/sync-router/{router}', [PppoeController::class, 'syncFromRouter'])->name('pppoe.sync-router');
+        Route::resource('pppoe', PppoeController::class)->except(['show']);
     });
 
     // ============================================
     // HOTSPOT MANAGEMENT
     // ============================================
     Route::middleware(['can:view hotspot', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        Route::resource('hotspot', HotspotController::class);
-        Route::post('/hotspot/{hotspot}/toggle', [HotspotController::class, 'toggle'])->name('hotspot.toggle');
-        Route::post('/hotspot/sync-router/{router}', [HotspotController::class, 'syncFromRouter'])->name('hotspot.sync-router');
+        // Vouchers (diletakkan sebelum resource agar tidak tertangkap oleh parameter /hotspot/{hotspot})
         Route::get('/hotspot/vouchers', [HotspotController::class, 'vouchers'])->name('hotspot.vouchers');
         Route::get('/hotspot/vouchers/generate', [HotspotController::class, 'generateVouchers'])->name('hotspot.vouchers.generate');
         Route::post('/hotspot/vouchers/store', [HotspotController::class, 'storeVouchers'])->name('hotspot.vouchers.store');
         Route::get('/hotspot/vouchers/{voucher}/print', [HotspotController::class, 'printVoucher'])->name('hotspot.vouchers.print');
         Route::post('/hotspot/vouchers/print-bulk', [HotspotController::class, 'printBulk'])->name('hotspot.vouchers.print-bulk');
+
+        Route::post('/hotspot/sync-router/{router}', [HotspotController::class, 'syncFromRouter'])->name('hotspot.sync-router');
+        Route::post('/hotspot/{hotspot}/toggle', [HotspotController::class, 'toggle'])->name('hotspot.toggle');
+        Route::resource('hotspot', HotspotController::class)->except(['show']);
     });
 
     // ============================================
     // QUEUE / BANDWIDTH MANAGEMENT
     // ============================================
     Route::middleware(['can:view queue', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        Route::resource('queue', QueueController::class);
-        Route::post('/queue/{queue}/toggle', [QueueController::class, 'toggle'])->name('queue.toggle');
         Route::post('/queue/sync-router/{router}', [QueueController::class, 'syncFromRouter'])->name('queue.sync-router');
+        Route::post('/queue/{queue}/toggle', [QueueController::class, 'toggle'])->name('queue.toggle');
+        Route::resource('queue', QueueController::class)->except(['show']);
     });
 
     // ============================================

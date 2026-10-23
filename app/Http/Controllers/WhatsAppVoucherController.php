@@ -75,13 +75,15 @@ class WhatsAppVoucherController extends Controller
     public function settings()
     {
         $settings = [
-            'api_url'        => Setting::get('whatsapp_api_url') ?: config('whatsapp.api_url'),
-            'api_key_set'    => !empty(Setting::get('whatsapp_api_key')) || !empty(config('whatsapp.api_key')),
-            'gateway_type'   => Setting::get('whatsapp_gateway_type') ?: config('whatsapp.gateway_type', 'auto'),
-            'session'        => Setting::get('whatsapp_session') ?: config('whatsapp.session', 'default'),
-            'webhook_secret' => Setting::get('whatsapp_webhook_secret') ?: config('whatsapp.webhook_secret'),
-            'admin_phone'    => Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone'),
-            'brand_name'     => Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot')),
+            'api_url'          => Setting::get('whatsapp_api_url') ?: config('whatsapp.api_url'),
+            'api_key_set'      => !empty(Setting::get('whatsapp_api_key')) || !empty(config('whatsapp.api_key')),
+            'gateway_type'     => Setting::get('whatsapp_gateway_type') ?: config('whatsapp.gateway_type', 'auto'),
+            'session'          => Setting::get('whatsapp_session') ?: config('whatsapp.session', 'default'),
+            'webhook_secret'   => Setting::get('whatsapp_webhook_secret') ?: config('whatsapp.webhook_secret'),
+            'admin_phone'      => Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone'),
+            'brand_name'       => Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot')),
+            'event_mode'       => (bool) Setting::get('whatsapp_event_mode', false),
+            'event_package_id' => Setting::get('whatsapp_event_package_id'),
         ];
 
         $availablePackages = Package::where('type', 'hotspot')
@@ -107,13 +109,15 @@ class WhatsAppVoucherController extends Controller
         }
 
         $validated = $request->validate([
-            'api_url'        => 'required|url',
-            'api_key'        => 'nullable|string|max:255',
-            'gateway_type'   => 'nullable|string|in:auto,openwa,fonnte',
-            'session'        => 'nullable|string|max:100',
-            'webhook_secret' => 'nullable|string|max:100',
-            'admin_phone'    => 'nullable|string|max:20',
-            'brand_name'     => 'nullable|string|max:100',
+            'api_url'          => 'required|url',
+            'api_key'          => 'nullable|string|max:255',
+            'gateway_type'     => 'nullable|string|in:auto,openwa,fonnte',
+            'session'          => 'nullable|string|max:100',
+            'webhook_secret'   => 'nullable|string|max:100',
+            'admin_phone'      => 'nullable|string|max:20',
+            'brand_name'       => 'nullable|string|max:100',
+            'event_mode'       => 'nullable|boolean',
+            'event_package_id' => 'nullable|exists:packages,id',
         ]);
 
         $adminPhone = !empty($validated['admin_phone'])
@@ -126,6 +130,8 @@ class WhatsAppVoucherController extends Controller
         Setting::set('whatsapp_session', trim($validated['session'] ?? 'default'), 'whatsapp');
         Setting::set('whatsapp_webhook_secret', trim($validated['webhook_secret'] ?? ''), 'whatsapp');
         Setting::set('whatsapp_admin_phone', $adminPhone, 'whatsapp');
+        Setting::set('whatsapp_event_mode', $request->has('event_mode'), 'whatsapp');
+        Setting::set('whatsapp_event_package_id', $validated['event_package_id'] ?? '', 'whatsapp');
 
         if (!empty($validated['api_key'])) {
             Setting::set('whatsapp_api_key', trim($validated['api_key']), 'whatsapp');

@@ -137,6 +137,36 @@
                         </small>
                     </div>
 
+                    <div style="border-top:1px solid var(--border-color);margin:24px 0 20px 0;padding-top:18px;">
+                        <h4 style="margin:0 0 12px 0;font-size:14px;color:#25d366;display:flex;align-items:center;gap:8px;">
+                            🎉 Mode Event & Voucher Gratis (Free Voucher)
+                        </h4>
+                        <div class="form-group">
+                            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-weight:600;">
+                                <input type="checkbox" name="event_mode" value="1" {{ !empty($settings['event_mode']) ? 'checked' : '' }}>
+                                Aktifkan Mode Event Voucher Gratis
+                            </label>
+                            <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                                Saat diaktifkan, semua orang (pengunjung / non-pelanggan) bisa request voucher gratis via WhatsApp. Sistem otomatis membatasi <strong>maksimal 1 voucher gratis per nomor WA dalam 1 hari</strong>.
+                            </small>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="form-label">Pilihan Paket Voucher Event Gratis</label>
+                            <select name="event_package_id" class="form-control">
+                                <option value="">-- Otomatis (Paket FREE / Gratis) --</option>
+                                @foreach($availablePackages as $pkg)
+                                    <option value="{{ $pkg->id }}" {{ ($settings['event_package_id'] ?? '') == $pkg->id ? 'selected' : '' }}>
+                                        {{ $pkg->name }} ({{ strtoupper($pkg->slug) }}) - Rp {{ number_format($pkg->price, 0, ',', '.') }}
+                                    </option>
+                                @endforeach
+                            </select>
+                            <small style="color:var(--text-muted);font-size:12px;margin-top:4px;display:block;">
+                                Paket yang akan dibagikan saat pengunjung request dengan format: <code>VOUCHER#NAMA_SSID#HOTSPOT-1HARI</code> atau <code>VOUCHER#NAMA_SSID#FREE</code>.
+                            </small>
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary" style="width:100%;">
                         💾 Simpan Pengaturan
                     </button>

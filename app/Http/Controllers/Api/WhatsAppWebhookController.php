@@ -37,6 +37,24 @@ class WhatsAppWebhookController extends Controller
      */
     public function incoming(Request $request)
     {
+        // Respons GET untuk healthcheck / verifikasi webhook dari browser atau dashboard gateway
+        if ($request->isMethod('get') && !$request->has('message') && !$request->has('text')) {
+            return response()->json([
+                'status'  => 'active',
+                'service' => 'MANTIK WhatsApp Webhook Gateway',
+                'time'    => now()->toDateTimeString(),
+            ]);
+        }
+
+        // Handle tes ping/verifikasi dari dashboard OpenWA atau gateway lain
+        $event = $request->input('event') ?? $request->input('type');
+        if (in_array(strtolower((string)$event), ['ping', 'test', 'webhook.test']) || $request->has('ping')) {
+            return response()->json([
+                'status'  => 'success',
+                'message' => 'Webhook connection verified successfully (pong)',
+            ]);
+        }
+
         // Validasi webhook secret jika dikonfigurasi
         $webhookSecret = Setting::get('whatsapp_webhook_secret') ?: config('whatsapp.webhook_secret');
         if ($webhookSecret) {
@@ -84,7 +102,7 @@ class WhatsAppWebhookController extends Controller
         $messageBody = trim((string) $messageBody);
 
         if (!$senderPhone || !$messageBody) {
-            return response()->json(['status' => 'ignored', 'reason' => 'empty_message']);
+            return response()->json(['status' => 'success', 'message' => 'Webhook event received (non-message event)']);
         }
 
         $phone = $this->wa->normalizePhone($senderPhone);

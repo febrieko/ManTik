@@ -7,11 +7,13 @@ use App\Models\HotspotVoucher;
 use App\Models\Package;
 use App\Models\Router;
 use App\Models\Setting;
+use App\Models\Customer;
 use App\Models\WaVoucherRequest;
 use App\Services\MikrotikService;
 use App\Services\WhatsAppService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
@@ -136,10 +138,28 @@ class WhatsAppWebhookController extends Controller
 
         Log::info('[WA Webhook] Pesan masuk dari ' . $phone . ' (rawChatId: ' . $rawChatId . '): ' . $messageBody);
 
-        // Cek pesan langsung seperti INFO, PAKET, atau FREE/GRATIS
         $bodyUpper = strtoupper($messageBody);
+
+        // 1. Cek jika pengirim sedang dalam sesi konfirmasi pembelian voucher
+        if (Cache::has("wa_voucher_order:{$phone}")) {
+            $confirmationResult = $this->handleOrderConfirmation($phone, $messageBody, $rawChatId);
+            if ($confirmationResult !== null) {
+                return $confirmationResult;
+            }
+        }
+
+        // 2. Cek pesan langsung seperti INFO, PAKET, atau SALDO
         if ($bodyUpper === 'INFO' || $bodyUpper === 'PAKET') {
             return $this->handleInfoRequest($phone, $rawChatId);
+        }
+
+        if (in_array($bodyUpper, ['SALDO', 'CEK SALDO', 'CEKSALDO', 'INFO SALDO', 'MY SALDO'])) {
+            return $this->handleCheckBalance($phone, $rawChatId);
+        }
+
+        if ($bodyUpper === 'BATAL') {
+            $this->wa->sendMessage($phone, "ℹ️ Tidak ada transaksi pembelian voucher yang sedang menunggu konfirmasi.", $rawChatId);
+            return response()->json(['status' => 'no_pending_order']);
         }
 
         if ($bodyUpper === 'FREE' || $bodyUpper === 'GRATIS') {
@@ -197,6 +217,278 @@ class WhatsAppWebhookController extends Controller
         }
 
         return $this->processVoucherRequest($phone, $packageCode, $requesterName, $routerQuery, $rawChatId);
+    }
+
+    /**
+     * Cari pelanggan aktif berdasarkan nomor telepon.
+     */
+    protected function findCustomerByPhone(string $phone): ?Customer
+    {
+        $normalized = $this->wa->normalizePhone($phone);
+        $localZero  = str_starts_with($normalized, '62') ? '0' . substr($normalized, 2) : null;
+
+        return Customer::where('status', 'active')
+            ->where(function ($q) use ($normalized, $localZero, $phone) {
+                $q->where('phone', $normalized)
+                  ->orWhere('phone', $phone);
+                if ($localZero) {
+                    $q->orWhere('phone', $localZero);
+                }
+            })
+            ->first();
+    }
+
+    /**
+     * Handle permintaan cek saldo dari pelanggan.
+     */
+    protected function handleCheckBalance(string $phone, ?string $rawChatId = null)
+    {
+        $customer = $this->findCustomerByPhone($phone);
+
+        if (!$customer) {
+            $this->wa->sendMessage(
+                $phone,
+                "❌ *Nomor Belum Terdaftar*\n\nNomor WhatsApp Anda ({$phone}) belum terdaftar sebagai pelanggan aktif MANTIK.\n\nSilakan hubungi admin kami untuk pendaftaran dan aktivasi layanan.",
+                $rawChatId
+            );
+            return response()->json(['status' => 'customer_not_found']);
+        }
+
+        $balanceFormatted = number_format($customer->balance, 0, ',', '.');
+        $activePackage = $customer->active_package;
+        $packageName = $activePackage ? $activePackage->name : 'Tidak ada paket langganan aktif';
+
+        $message  = "👤 *Informasi Pelanggan MANTIK*\n";
+        $message .= "━━━━━━━━━━━━━━━━━━━━\n";
+        $message .= "Nama: *{$customer->name}*\n";
+        $message .= "Nomor WA: *{$customer->phone}*\n";
+        $message .= "💰 Saldo Deposit: *Rp {$balanceFormatted}*\n";
+        $message .= "📦 Paket Langganan: {$packageName}\n";
+        $message .= "━━━━━━━━━━━━━━━━━━━━\n";
+        $message .= "📱 Ketik *PAKET* untuk melihat daftar paket voucher hotspot yang dapat Anda beli dengan saldo.";
+
+        $this->wa->sendMessage($phone, $message, $rawChatId);
+        return response()->json([
+            'status'  => 'success',
+            'balance' => (float) $customer->balance,
+            'name'    => $customer->name,
+        ]);
+    }
+
+    /**
+     * Handle konfirmasi pembelian voucher dengan saldo (Two-step verification).
+     */
+    protected function handleOrderConfirmation(string $phone, string $messageBody, ?string $rawChatId = null)
+    {
+        $cacheKey = "wa_voucher_order:{$phone}";
+        $order = Cache::get($cacheKey);
+
+        if (!$order) {
+            return null;
+        }
+
+        $bodyClean = strtoupper(trim($messageBody));
+
+        // 1. Tangani pembatalan pesanan
+        if ($bodyClean === 'BATAL') {
+            Cache::forget($cacheKey);
+            $this->wa->sendMessage(
+                $phone,
+                "✅ Permintaan pembelian voucher hotspot telah dibatalkan. Saldo deposit Anda aman dan tidak terpotong.",
+                $rawChatId
+            );
+            return response()->json(['status' => 'order_cancelled']);
+        }
+
+        // 2. Validasi format kode konfirmasi: "YA <KODE>", "YA<KODE>", atau langsung "<KODE>"
+        $expectedCode = (string) $order['code'];
+        $validFormats = [
+            "YA {$expectedCode}",
+            "YA{$expectedCode}",
+            $expectedCode,
+        ];
+
+        // Jika user hanya membalas YA atau memasukkan kode yang salah
+        if (!in_array($bodyClean, $validFormats)) {
+            // Jika pesan tidak menyerupai konfirmasi (misal mengetik pesan lain), cek apakah diawali YA atau angka
+            $isAttempt = str_starts_with($bodyClean, 'YA') || preg_match('/^\d{3,6}$/', $bodyClean);
+
+            if ($isAttempt) {
+                $order['attempts'] = ($order['attempts'] ?? 0) + 1;
+                if ($order['attempts'] >= 3) {
+                    Cache::forget($cacheKey);
+                    $this->wa->sendMessage(
+                        $phone,
+                        "❌ *Batas Percobaan Habis*\n\nKode konfirmasi salah sebanyak 3 kali. Sesi pembelian voucher dibatalkan demi keamanan saldo Anda.",
+                        $rawChatId
+                    );
+                    return response()->json(['status' => 'max_attempts_exceeded']);
+                }
+
+                Cache::put($cacheKey, $order, now()->addMinutes(2));
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ Kode konfirmasi salah.\n\nSilakan balas *YA {$expectedCode}* untuk memproses, atau ketik *BATAL* untuk membatalkan.",
+                    $rawChatId
+                );
+                return response()->json(['status' => 'invalid_confirmation_code']);
+            }
+
+            // Jika bukan format konfirmasi sama sekali, abaikan agar alur normal (misal ketik INFO) bisa berjalan
+            return null;
+        }
+
+        // 3. Eksekusi Pembelian dengan Pessimistic Lock & Database Transaction
+        DB::beginTransaction();
+        try {
+            $lockedCustomer = Customer::where('id', $order['customer_id'])
+                ->lockForUpdate()
+                ->first();
+
+            if (!$lockedCustomer || (float) $lockedCustomer->balance < (float) $order['price']) {
+                DB::rollBack();
+                Cache::forget($cacheKey);
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ *Saldo Tidak Mencukupi*\n\nTransaksi gagal karena saldo deposit Anda tidak mencukupi untuk menyelesaikan transaksi ini.",
+                    $rawChatId
+                );
+                return response()->json(['status' => 'insufficient_balance']);
+            }
+
+            $package = Package::find($order['package_id']);
+            if (!$package) {
+                DB::rollBack();
+                Cache::forget($cacheKey);
+                $this->wa->sendMessage($phone, "❌ Paket tidak ditemukan atau sudah tidak aktif.", $rawChatId);
+                return response()->json(['status' => 'package_not_found']);
+            }
+
+            // Cari voucher yang tersedia untuk router & paket ini
+            $voucherQuery = HotspotVoucher::with('router')
+                ->where('package_id', $order['package_id'])
+                ->where('is_used', false)
+                ->whereNull('used_at')
+                ->where(function ($q) {
+                    $q->whereNull('expires_at')
+                      ->orWhere('expires_at', '>', now());
+                });
+
+            if (!empty($order['router_id'])) {
+                $voucherQuery->where('router_id', $order['router_id']);
+            }
+
+            $voucher = $voucherQuery->lockForUpdate()->first();
+
+            if (!$voucher) {
+                DB::rollBack();
+                Cache::forget($cacheKey);
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ *Stok Voucher Habis*\n\nMaaf, stok voucher untuk paket *{$package->name}* baru saja habis. Saldo deposit Anda aman dan tidak terpotong.",
+                    $rawChatId
+                );
+                return response()->json(['status' => 'out_of_stock']);
+            }
+
+            // 1. Potong Saldo Customer
+            $lockedCustomer->decrement('balance', $order['price']);
+
+            // 2. Tandai Voucher Terpakai
+            $expiresAt = now()->addDays($package->duration_days);
+            $voucher->update([
+                'is_used'    => true,
+                'used_by'    => $lockedCustomer->name . ' (' . $phone . ')',
+                'used_at'    => now(),
+                'expires_at' => $expiresAt,
+            ]);
+
+            // 3. Catat di WaVoucherRequest
+            WaVoucherRequest::create([
+                'phone'          => $phone,
+                'customer_id'    => $lockedCustomer->id,
+                'requester_name' => $order['requester_name'] ?: $lockedCustomer->name,
+                'package_code'   => strtoupper($order['package_slug']),
+                'package_id'     => $package->id,
+                'voucher_id'     => $voucher->id,
+                'voucher_code'   => $voucher->code,
+                'price_deducted' => $order['price'],
+                'status'         => 'success',
+                'raw_message'    => "CONFIRM_BUY#{$expectedCode}",
+            ]);
+
+            // Hapus cache sesi pesanan
+            Cache::forget($cacheKey);
+
+            DB::commit();
+
+            // Ambil data router & brand hotspot
+            $router = $voucher->router;
+            $ssid = $router?->ssid ?: $router?->name;
+            $brandName = Setting::get('hotspot_brand_name', config('app.name', 'MANTIK Hotspot'));
+
+            $durationLabel = $package->duration_days >= 1
+                ? $package->duration_days . ' Hari'
+                : ($package->duration_days * 24) . ' Jam';
+
+            // Kirim voucher ke pelanggan
+            $this->wa->sendVoucher($phone, [
+                'name'         => $lockedCustomer->name,
+                'code'         => $voucher->code,
+                'package_name' => $package->name,
+                'speed'        => "{$package->bandwidth_up}/{$package->bandwidth_down} Mbps",
+                'duration'     => $durationLabel,
+                'expires_at'   => $expiresAt->toDateTimeString(),
+                'price'        => $order['price'],
+                'router_name'  => $router?->name,
+                'ssid'         => $ssid,
+                'brand_name'   => $brandName,
+            ], $rawChatId);
+
+            // Kirim notifikasi konfirmasi saldo terpotong
+            $remainingBalance = number_format($lockedCustomer->balance, 0, ',', '.');
+            $priceFormatted = number_format($order['price'], 0, ',', '.');
+            $this->wa->sendMessage(
+                $phone,
+                "💰 *Pembayaran Saldo Berhasil*\nSaldo deposit Anda terpotong: *Rp {$priceFormatted}*\nSisa saldo saat ini: *Rp {$remainingBalance}*.",
+                $rawChatId
+            );
+
+            // Kirim notifikasi admin jika disetel
+            $adminPhone = Setting::get('whatsapp_admin_phone') ?: config('whatsapp.admin_phone');
+            if ($adminPhone) {
+                $this->wa->sendAdminNotification($adminPhone, [
+                    'requester_name' => $lockedCustomer->name . " (Pelanggan Saldo)",
+                    'phone'          => $phone,
+                    'package_name'   => $package->name,
+                    'voucher_code'   => $voucher->code,
+                    'ssid'           => $ssid,
+                    'router_name'    => $router?->name,
+                ]);
+            }
+
+            Log::info("[WA Webhook] Pembelian voucher berbayar sukses: {$voucher->code} oleh customer ID {$lockedCustomer->id} ({$phone})");
+
+            return response()->json([
+                'status'  => 'success',
+                'voucher' => $voucher->code,
+                'balance' => (float) $lockedCustomer->balance,
+            ]);
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Log::error('[WA Webhook] Gagal konfirmasi voucher berbayar: ' . $e->getMessage(), [
+                'phone' => $phone,
+                'order' => $order,
+            ]);
+
+            $this->wa->sendMessage(
+                $phone,
+                "❌ Terjadi kesalahan sistem saat memproses pemotongan saldo. Saldo Anda aman dan tidak terpotong.",
+                $rawChatId
+            );
+
+            return response()->json(['status' => 'error', 'message' => $e->getMessage()], 500);
+        }
     }
 
     /**
@@ -343,7 +635,7 @@ class WhatsAppWebhookController extends Controller
             || str_contains(strtolower($package->name), 'free')
             || ($eventMode && (!$eventPackageId || $eventPackageId == $package->id));
 
-        // 4. Pembatasan Request (1 Voucher Gratis Per Hari vs Anti-Spam 1 Jam)
+        // 4. Pembatasan Request & Verifikasi Akun Saldo Pelanggan
         if ($isFree) {
             // BATAS VOUCHER GRATIS: 1 nomor WA hanya bisa menerima 1 voucher gratis dalam satu hari (sejak jam 00:00:00 hari ini)
             $claimedToday = WaVoucherRequest::where('phone', $phone)
@@ -373,20 +665,124 @@ class WhatsAppWebhookController extends Controller
                 return response()->json(['status' => 'daily_limit_reached']);
             }
         } else {
-            // Anti-spam 1 jam standar untuk paket berbayar
-            $recentRequest = WaVoucherRequest::where('phone', $phone)
-                ->where('status', 'success')
-                ->where('created_at', '>=', now()->subHour())
-                ->exists();
+            // PAKET BERBAYAR: Wajib diverifikasi nomor WhatsApp sesuai data Customer terdaftar yang memiliki saldo
+            $customer = $this->findCustomerByPhone($phone);
 
-            if ($recentRequest) {
+            if (!$customer) {
+                $priceFormatted = number_format($package->price, 0, ',', '.');
                 $this->wa->sendMessage(
                     $phone,
-                    "⏳ *Permintaan Terlalu Sering*\n\nAnda baru saja mendapatkan voucher. Harap tunggu minimal 1 jam sebelum meminta voucher baru.\n\nHubungi admin jika ada masalah.",
+                    "❌ *Pelanggan Belum Terdaftar*\n\nPaket *{$package->name}* seharga *Rp {$priceFormatted}* hanya dapat dibeli oleh pelanggan MANTIK menggunakan saldo deposit.\n\nNomor WhatsApp Anda ({$phone}) belum terdaftar sebagai pelanggan aktif kami. Silakan hubungi admin kami untuk pendaftaran dan pengisian saldo deposit.",
                     $rawChatId
                 );
-                return response()->json(['status' => 'rate_limited']);
+
+                WaVoucherRequest::create([
+                    'phone'          => $phone,
+                    'requester_name' => $requesterName,
+                    'package_code'   => strtoupper($package->slug),
+                    'package_id'     => $package->id,
+                    'status'         => 'failed',
+                    'failure_reason' => 'Customer not registered or inactive',
+                    'raw_message'    => "VOUCHER#" . ($routerQuery ? "{$routerQuery}#" : "") . "{$packageCode}#{$requesterName}",
+                ]);
+
+                return response()->json(['status' => 'customer_not_found']);
             }
+
+            // Cek kecukupan saldo customer
+            if ((float) $customer->balance < (float) $package->price) {
+                $priceFormatted = number_format($package->price, 0, ',', '.');
+                $balanceFormatted = number_format($customer->balance, 0, ',', '.');
+
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ *Saldo Tidak Mencukupi*\n\nHalo *{$customer->name}*,\nSaldo deposit Anda tidak mencukupi untuk membeli paket ini.\n\n"
+                    . "📦 Paket: *{$package->name}*\n"
+                    . "💰 Harga Paket: *Rp {$priceFormatted}*\n"
+                    . "💳 Saldo Anda: *Rp {$balanceFormatted}*\n\n"
+                    . "Silakan lakukan isi ulang (top-up) saldo Anda melalui admin kami.",
+                    $rawChatId
+                );
+
+                WaVoucherRequest::create([
+                    'phone'          => $phone,
+                    'customer_id'    => $customer->id,
+                    'requester_name' => $customer->name,
+                    'package_code'   => strtoupper($package->slug),
+                    'package_id'     => $package->id,
+                    'status'         => 'failed',
+                    'failure_reason' => 'Insufficient balance: need ' . $package->price . ', has ' . $customer->balance,
+                    'raw_message'    => "VOUCHER#" . ($routerQuery ? "{$routerQuery}#" : "") . "{$packageCode}#{$requesterName}",
+                ]);
+
+                return response()->json(['status' => 'insufficient_balance']);
+            }
+
+            // Cek ketersediaan stok voucher di database sebelum membuat sesi konfirmasi
+            $voucherQuery = HotspotVoucher::where('package_id', $package->id)
+                ->where('is_used', false)
+                ->whereNull('used_at')
+                ->where(function ($q) {
+                    $q->whereNull('expires_at')
+                      ->orWhere('expires_at', '>', now());
+                });
+
+            if ($targetRouter) {
+                $voucherQuery->where('router_id', $targetRouter->id);
+            }
+
+            if (!$voucherQuery->exists()) {
+                $locationInfo = $targetRouter ? " untuk WiFi *{$targetRouter->ssid}*" : "";
+                $this->wa->sendMessage(
+                    $phone,
+                    "❌ *Stok Voucher Habis*\n\nMaaf, stok voucher untuk paket *{$package->name}*{$locationInfo} sedang kosong.\n\nSaldo deposit Anda aman dan belum terpotong.",
+                    $rawChatId
+                );
+                return response()->json(['status' => 'out_of_stock']);
+            }
+
+            // Buat kode verifikasi/konfirmasi acak 4 digit
+            $confirmCode = (string) random_int(1000, 9999);
+            $cacheKey = "wa_voucher_order:{$phone}";
+
+            Cache::put($cacheKey, [
+                'customer_id'    => $customer->id,
+                'customer_name'  => $customer->name,
+                'package_id'     => $package->id,
+                'package_name'   => $package->name,
+                'package_slug'   => $package->slug,
+                'router_id'      => $targetRouter?->id,
+                'price'          => (float) $package->price,
+                'code'           => $confirmCode,
+                'attempts'       => 0,
+                'requester_name' => $requesterName ?: $customer->name,
+            ], now()->addMinutes(3));
+
+            $priceFormatted   = number_format($package->price, 0, ',', '.');
+            $balanceFormatted = number_format($customer->balance, 0, ',', '.');
+            $estSisaFormatted = number_format($customer->balance - $package->price, 0, ',', '.');
+            $locationNotice   = $targetRouter ? "\n📡 WiFi / Lokasi: *{$targetRouter->ssid}*" : "";
+
+            $confirmMessage  = "⚠️ *Konfirmasi Pembelian Voucher*\n";
+            $confirmMessage .= "━━━━━━━━━━━━━━━━━━━━\n";
+            $confirmMessage .= "Halo, *{$customer->name}*!\n";
+            $confirmMessage .= "Anda akan membeli voucher hotspot:{$locationNotice}\n";
+            $confirmMessage .= "• 📦 Paket: *{$package->name}*\n";
+            $confirmMessage .= "• 💰 Harga: *Rp {$priceFormatted}*\n";
+            $confirmMessage .= "• 💳 Saldo Anda saat ini: *Rp {$balanceFormatted}*\n";
+            $confirmMessage .= "• 💵 Sisa saldo setelah beli: *Rp {$estSisaFormatted}*\n";
+            $confirmMessage .= "━━━━━━━━━━━━━━━━━━━━\n";
+            $confirmMessage .= "👉 Balas *YA {$confirmCode}* untuk memproses pemotongan saldo.\n";
+            $confirmMessage .= "👉 Balas *BATAL* untuk membatalkan.\n\n";
+            $confirmMessage .= "⏳ _Konfirmasi ini berlaku selama 3 menit._";
+
+            $this->wa->sendMessage($phone, $confirmMessage, $rawChatId);
+
+            return response()->json([
+                'status'       => 'confirmation_required',
+                'confirm_code' => $confirmCode,
+                'price'        => (float) $package->price,
+            ]);
         }
 
         // Cari voucher yang tersedia di database (dengan relasi router)

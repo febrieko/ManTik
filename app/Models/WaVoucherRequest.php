@@ -13,20 +13,31 @@ class WaVoucherRequest extends Model
 
     protected $fillable = [
         'phone',
+        'customer_id',
         'requester_name',
         'package_code',
         'package_id',
         'voucher_id',
         'voucher_code',
+        'price_deducted',
         'status',
         'failure_reason',
         'raw_message',
     ];
 
     protected $casts = [
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
+        'price_deducted' => 'decimal:2',
+        'created_at'     => 'datetime',
+        'updated_at'     => 'datetime',
     ];
+
+    /**
+     * Relasi ke Customer.
+     */
+    public function customer()
+    {
+        return $this->belongsTo(Customer::class);
+    }
 
     /**
      * Relasi ke Package.

@@ -14,6 +14,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\PaymentGatewayController;
+use App\Http\Controllers\PublicVoucherController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\Api\RouterApiController;
@@ -35,6 +36,16 @@ Route::get('/', function () {
 
 // Auth routes (Staff/Admin)
 require __DIR__ . '/auth.php';
+
+// ============================================
+// PUBLIC DIRECT VOUCHER CHECKOUT (Guest / Captive Portal)
+// ============================================
+Route::prefix('beli-voucher')->name('public.voucher.')->group(function () {
+    Route::get('/', [PublicVoucherController::class, 'index'])->name('index');
+    Route::post('/', [PublicVoucherController::class, 'checkout'])->name('checkout');
+    Route::get('/status/{referenceCode}', [PublicVoucherController::class, 'status'])->name('status');
+    Route::get('/status/{referenceCode}/poll', [PublicVoucherController::class, 'poll'])->name('poll');
+});
 
 // ============================================
 // CUSTOMER PORTAL ROUTES (Login Khusus Pelanggan)
@@ -163,6 +174,8 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
         Route::get('/billing/{billing}/invoice', [BillingController::class, 'invoice'])->name('billing.invoice');
         Route::post('/billing/{billing}/remind', [BillingController::class, 'sendReminder'])->name('billing.remind');
         Route::post('/billing/generate-monthly', [BillingController::class, 'generateMonthly'])->name('billing.generate-monthly');
+        Route::get('/public-orders', [PublicVoucherController::class, 'adminIndex'])->name('public-orders.index');
+        Route::post('/public-orders/{order}/retry-fulfill', [PublicVoucherController::class, 'retryFulfill'])->name('public-orders.retry-fulfill');
     });
 
     // ============================================

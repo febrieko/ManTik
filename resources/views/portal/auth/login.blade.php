@@ -209,7 +209,10 @@
         </form>
 
         <div class="footer-links">
-            <div>Belum punya akun portal? Hubungi Admin untuk aktivasi nomor WhatsApp Anda.</div>
+            <div>
+                <a href="{{ route('public.voucher.index') }}" style="color:#4ade80;">⚡ Beli Voucher WiFi Langsung (Tanpa Login) →</a>
+            </div>
+            <div style="margin-top:8px;">Belum punya akun portal? Hubungi Admin untuk aktivasi nomor WhatsApp Anda.</div>
             <div style="margin-top:10px;">
                 Staff / Admin? <a href="{{ route('login') }}">Login Admin di sini</a>
             </div>

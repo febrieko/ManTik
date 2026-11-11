@@ -133,6 +133,17 @@
                 <li><strong>Xendit:</strong> memvalidasi header <code>x-callback-token</code> memakai Callback Token (diisi pada Private Key).</li>
             </ul>
         </div>
+
+        <div style="margin-top:16px;padding:12px 14px;border-radius:10px;background:rgba(37,211,102,0.08);border:1px solid rgba(37,211,102,0.25);font-size:13px;color:var(--text-muted);">
+            <strong style="color:#4ade80;">⚡ Link Beli Voucher Langsung (Captive Portal Hotspot):</strong>
+            <div style="display:flex;gap:8px;margin-top:8px;">
+                <input type="text" class="form-control" value="{{ route('public.voucher.index') }}" readonly style="font-family:monospace;font-size:12px;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="navigator.clipboard.writeText('{{ route('public.voucher.index') }}')">Salin</button>
+            </div>
+            <div style="margin-top:8px;font-size:12px;">
+                Pastikan domain MANTIK &amp; domain Payment Gateway dimasukkan ke <strong>IP → Hotspot → Walled Garden</strong> di MikroTik agar pengunjung yang belum login WiFi tetap bisa membayar.
+            </div>
+        </div>
     </div>
 </div>
 

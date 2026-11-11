@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\PublicVoucherOrder;
 use App\Models\Setting;
 use App\Models\TopupTransaction;
 use Illuminate\Http\Request;
@@ -10,8 +11,10 @@ use Illuminate\Support\Facades\Log;
 
 class PaymentGatewayService
 {
-    public function __construct(protected CustomerBalanceService $balanceService)
-    {
+    public function __construct(
+        protected CustomerBalanceService $balanceService,
+        protected PublicVoucherService $publicVoucherService,
+    ) {
     }
 
     /**
@@ -42,22 +45,91 @@ class PaymentGatewayService
     }
 
     /**
-     * Buat invoice pembayaran di Payment Gateway untuk transaksi top-up.
+     * Buat invoice pembayaran di Payment Gateway untuk transaksi top-up saldo pelanggan.
      */
     public function createTopupInvoice(TopupTransaction $topup, ?string $channel = null): TopupTransaction
     {
-        $cfg      = $this->getConfig();
-        $provider = $cfg['provider'];
-        $channel  = $channel ?: $cfg['default_channel'];
-
         if (!$this->isGatewayActive()) {
             return $topup;
         }
 
+        $customer = $topup->customer;
+        $phone    = $customer->phone ?: '08123456789';
+
+        $result = $this->requestGatewayInvoice(
+            referenceCode: $topup->reference_code,
+            amount: (int) round((float) $topup->amount),
+            buyer: [
+                'name'  => $customer->name,
+                'email' => $customer->email ?: ($phone . '@customer.local'),
+                'phone' => $phone,
+            ],
+            item: [
+                'sku'  => 'TOPUP-SALDO',
+                'name' => 'Top-Up Saldo Deposit MANTIK',
+            ],
+            returnUrl: route('portal.dashboard'),
+            channel: $channel,
+        );
+
+        if (!empty($result)) {
+            $topup->update($result);
+        }
+
+        return $topup->fresh();
+    }
+
+    /**
+     * Buat invoice pembayaran di Payment Gateway untuk order pembelian voucher publik (Guest Checkout).
+     */
+    public function createPublicVoucherInvoice(PublicVoucherOrder $order, ?string $channel = null): PublicVoucherOrder
+    {
+        if (!$this->isGatewayActive()) {
+            return $order;
+        }
+
+        $phone       = $order->buyer_phone ?: '08123456789';
+        $packageName = $order->package?->name ?: 'Voucher Hotspot MANTIK';
+
+        $result = $this->requestGatewayInvoice(
+            referenceCode: $order->reference_code,
+            amount: (int) round((float) $order->amount),
+            buyer: [
+                'name'  => $order->buyer_name ?: 'Tamu Hotspot',
+                'email' => preg_replace('/\D/', '', $phone) . '@guest.local',
+                'phone' => $phone,
+            ],
+            item: [
+                'sku'  => 'VOUCHER-' . $order->package_id,
+                'name' => 'Voucher WiFi: ' . $packageName,
+            ],
+            returnUrl: route('public.voucher.status', $order->reference_code),
+            channel: $channel,
+        );
+
+        if (!empty($result)) {
+            $order->update($result);
+        }
+
+        return $order->fresh();
+    }
+
+    /**
+     * Helper terpadu memanggil API Tripay, Midtrans, Duitku, atau Xendit.
+     * Mengembalikan array kolom update jika sukses, atau [] jika gagal.
+     */
+    protected function requestGatewayInvoice(
+        string $referenceCode,
+        int $amount,
+        array $buyer,
+        array $item,
+        string $returnUrl,
+        ?string $channel = null
+    ): array {
+        $cfg         = $this->getConfig();
+        $provider    = $cfg['provider'];
+        $channel     = $channel ?: $cfg['default_channel'];
         $callbackUrl = url("/api/payment-gateway/callback/{$provider}");
-        $returnUrl   = route('portal.dashboard');
-        $customer    = $topup->customer;
-        $amount      = (int) round((float) $topup->amount);
 
         try {
             if ($provider === 'tripay') {
@@ -65,20 +137,20 @@ class PaymentGatewayService
                     ? 'https://tripay.co.id/api/transaction/create'
                     : 'https://tripay.co.id/api-sandbox/transaction/create';
 
-                $signature = hash_hmac('sha256', $cfg['merchant_code'] . $topup->reference_code . $amount, $cfg['private_key']);
+                $signature = hash_hmac('sha256', $cfg['merchant_code'] . $referenceCode . $amount, $cfg['private_key']);
 
                 $res = Http::timeout(15)
                     ->withToken($cfg['api_key'])
                     ->post($baseUrl, [
                         'method'         => $channel,
-                        'merchant_ref'   => $topup->reference_code,
+                        'merchant_ref'   => $referenceCode,
                         'amount'         => $amount,
-                        'customer_name'  => $customer->name,
-                        'customer_email' => $customer->email ?: ($customer->phone . '@customer.local'),
-                        'customer_phone' => $customer->phone ?: '08123456789',
+                        'customer_name'  => $buyer['name'],
+                        'customer_email' => $buyer['email'],
+                        'customer_phone' => $buyer['phone'],
                         'order_items'    => [[
-                            'sku'      => 'TOPUP-SALDO',
-                            'name'     => 'Top-Up Saldo Deposit MANTIK',
+                            'sku'      => $item['sku'],
+                            'name'     => $item['name'],
                             'price'    => $amount,
                             'quantity' => 1,
                         ]],
@@ -90,7 +162,7 @@ class PaymentGatewayService
 
                 $data = $res->json('data') ?? [];
                 if ($res->successful() && !empty($data)) {
-                    $topup->update([
+                    return [
                         'gateway'           => 'tripay',
                         'payment_method'    => strtolower($channel),
                         'gateway_reference' => $data['reference'] ?? null,
@@ -99,10 +171,10 @@ class PaymentGatewayService
                         'fee'               => (float) ($data['total_fee'] ?? 0),
                         'total_amount'      => (float) ($data['amount'] ?? $amount),
                         'payload'           => $data,
-                    ]);
-                } else {
-                    Log::warning('[PaymentGateway][Tripay] Gagal create invoice', ['response' => $res->json()]);
+                    ];
                 }
+
+                Log::warning('[PaymentGateway][Tripay] Gagal create invoice', ['response' => $res->json()]);
             } elseif ($provider === 'midtrans') {
                 $baseUrl = $cfg['mode'] === 'production'
                     ? 'https://app.midtrans.com/snap/v1/transactions'
@@ -112,13 +184,13 @@ class PaymentGatewayService
                     ->withBasicAuth($cfg['api_key'], '')
                     ->post($baseUrl, [
                         'transaction_details' => [
-                            'order_id'     => $topup->reference_code,
+                            'order_id'     => $referenceCode,
                             'gross_amount' => $amount,
                         ],
                         'customer_details' => [
-                            'first_name' => $customer->name,
-                            'email'      => $customer->email ?: ($customer->phone . '@customer.local'),
-                            'phone'      => $customer->phone,
+                            'first_name' => $buyer['name'],
+                            'email'      => $buyer['email'],
+                            'phone'      => $buyer['phone'],
                         ],
                         'callbacks' => [
                             'finish' => $returnUrl,
@@ -127,59 +199,59 @@ class PaymentGatewayService
 
                 $data = $res->json() ?? [];
                 if ($res->successful() && !empty($data['redirect_url'])) {
-                    $topup->update([
+                    return [
                         'gateway'           => 'midtrans',
                         'payment_method'    => 'snap',
                         'gateway_reference' => $data['token'] ?? null,
                         'payment_url'       => $data['redirect_url'],
                         'payload'           => $data,
-                    ]);
-                } else {
-                    Log::warning('[PaymentGateway][Midtrans] Gagal create snap', ['response' => $data]);
+                    ];
                 }
+
+                Log::warning('[PaymentGateway][Midtrans] Gagal create snap', ['response' => $data]);
             } elseif ($provider === 'duitku') {
                 $baseUrl = $cfg['mode'] === 'production'
                     ? 'https://passport.duitku.com/webapi/api/merchant/v2/inquiry'
                     : 'https://sandbox.duitku.com/webapi/api/merchant/v2/inquiry';
 
-                $signature = md5($cfg['merchant_code'] . $topup->reference_code . $amount . $cfg['api_key']);
+                $signature = md5($cfg['merchant_code'] . $referenceCode . $amount . $cfg['api_key']);
 
                 $res = Http::timeout(15)->post($baseUrl, [
-                    'merchantCode'     => $cfg['merchant_code'],
-                    'paymentAmount'    => $amount,
-                    'paymentMethod'    => $channel,
-                    'merchantOrderId'  => $topup->reference_code,
-                    'productDetails'   => 'Top-Up Saldo Deposit MANTIK',
-                    'customerVaName'   => $customer->name,
-                    'email'            => $customer->email ?: ($customer->phone . '@customer.local'),
-                    'phoneNumber'      => $customer->phone,
-                    'callbackUrl'      => $callbackUrl,
-                    'returnUrl'        => $returnUrl,
-                    'signature'        => $signature,
-                    'expiryPeriod'     => 1440,
+                    'merchantCode'    => $cfg['merchant_code'],
+                    'paymentAmount'   => $amount,
+                    'paymentMethod'   => $channel,
+                    'merchantOrderId' => $referenceCode,
+                    'productDetails'  => $item['name'],
+                    'customerVaName'  => $buyer['name'],
+                    'email'           => $buyer['email'],
+                    'phoneNumber'     => $buyer['phone'],
+                    'callbackUrl'     => $callbackUrl,
+                    'returnUrl'       => $returnUrl,
+                    'signature'       => $signature,
+                    'expiryPeriod'    => 1440,
                 ]);
 
                 $data = $res->json() ?? [];
                 if ($res->successful() && !empty($data['paymentUrl'])) {
-                    $topup->update([
+                    return [
                         'gateway'           => 'duitku',
                         'payment_method'    => strtolower($channel),
                         'gateway_reference' => $data['reference'] ?? null,
                         'payment_url'       => $data['paymentUrl'],
                         'qr_url'            => $data['qrString'] ?? null,
                         'payload'           => $data,
-                    ]);
-                } else {
-                    Log::warning('[PaymentGateway][Duitku] Gagal create inquiry', ['response' => $data]);
+                    ];
                 }
+
+                Log::warning('[PaymentGateway][Duitku] Gagal create inquiry', ['response' => $data]);
             } elseif ($provider === 'xendit') {
                 $res = Http::timeout(15)
                     ->withBasicAuth($cfg['api_key'], '')
                     ->post('https://api.xendit.co/v2/invoices', [
-                        'external_id'          => $topup->reference_code,
+                        'external_id'          => $referenceCode,
                         'amount'               => $amount,
-                        'payer_email'          => $customer->email ?: ($customer->phone . '@customer.local'),
-                        'description'          => 'Top-Up Saldo Deposit MANTIK',
+                        'payer_email'          => $buyer['email'],
+                        'description'          => $item['name'],
                         'success_redirect_url' => $returnUrl,
                         'failure_redirect_url' => $returnUrl,
                         'invoice_duration'     => 86400,
@@ -187,22 +259,22 @@ class PaymentGatewayService
 
                 $data = $res->json() ?? [];
                 if ($res->successful() && !empty($data['invoice_url'])) {
-                    $topup->update([
+                    return [
                         'gateway'           => 'xendit',
                         'payment_method'    => 'xendit_invoice',
                         'gateway_reference' => $data['id'] ?? null,
                         'payment_url'       => $data['invoice_url'],
                         'payload'           => $data,
-                    ]);
-                } else {
-                    Log::warning('[PaymentGateway][Xendit] Gagal create invoice', ['response' => $data]);
+                    ];
                 }
+
+                Log::warning('[PaymentGateway][Xendit] Gagal create invoice', ['response' => $data]);
             }
         } catch (\Throwable $e) {
             Log::error("[PaymentGateway][{$provider}] Exception: " . $e->getMessage());
         }
 
-        return $topup->fresh();
+        return [];
     }
 
     /**
@@ -234,7 +306,7 @@ class PaymentGatewayService
     }
 
     /**
-     * Proses callback/webhook dari Payment Gateway.
+     * Proses callback/webhook dari Payment Gateway (baik untuk Topup Saldo maupun Order Voucher Publik).
      */
     public function handleCallback(string $provider, Request $request): array
     {
@@ -243,7 +315,6 @@ class PaymentGatewayService
             return ['ok' => false, 'code' => 401, 'message' => 'Invalid signature'];
         }
 
-        // Ekstrak reference_code dan status sesuai format masing-masing provider
         $referenceCode = match ($provider) {
             'tripay'   => $request->input('merchant_ref'),
             'midtrans' => $request->input('order_id'),
@@ -254,16 +325,6 @@ class PaymentGatewayService
 
         if (!$referenceCode) {
             return ['ok' => false, 'code' => 400, 'message' => 'Missing reference code'];
-        }
-
-        $topup = TopupTransaction::where('reference_code', $referenceCode)->first();
-        if (!$topup) {
-            return ['ok' => false, 'code' => 404, 'message' => 'Topup transaction not found'];
-        }
-
-        // Idempotency: jika sudah lunas, langsung kembalikan sukses
-        if ($topup->status === 'paid') {
-            return ['ok' => true, 'code' => 200, 'message' => 'Already paid'];
         }
 
         $isPaid = match ($provider) {
@@ -283,23 +344,58 @@ class PaymentGatewayService
             default    => false,
         };
 
-        if ($isPaid) {
-            $this->balanceService->approveTopup($topup, null, $request->all());
-            return ['ok' => true, 'code' => 200, 'message' => 'Topup credited'];
+        // 1. Cek apakah callback untuk Top-Up Saldo Pelanggan (TOPUP-...)
+        $topup = TopupTransaction::where('reference_code', $referenceCode)->first();
+        if ($topup) {
+            if ($topup->status === 'paid') {
+                return ['ok' => true, 'code' => 200, 'message' => 'Already paid'];
+            }
+
+            if ($isPaid) {
+                $this->balanceService->approveTopup($topup, null, $request->all());
+                return ['ok' => true, 'code' => 200, 'message' => 'Topup credited'];
+            }
+
+            if ($isFailedOrExpired) {
+                $newStatus = $this->resolveFailedStatus($request);
+                $topup->update(['status' => $newStatus, 'payload' => $request->all()]);
+                return ['ok' => true, 'code' => 200, 'message' => "Marked as {$newStatus}"];
+            }
+
+            return ['ok' => true, 'code' => 200, 'message' => 'Callback ignored (non-final status)'];
         }
 
-        if ($isFailedOrExpired) {
-            $newStatus = in_array(strtoupper((string) ($request->input('status') ?: $request->input('transaction_status'))), ['EXPIRED', 'EXPIRE'])
-                ? 'expired'
-                : 'failed';
-            $topup->update([
-                'status'  => $newStatus,
-                'payload' => $request->all(),
-            ]);
-            return ['ok' => true, 'code' => 200, 'message' => "Marked as {$newStatus}"];
+        // 2. Cek apakah callback untuk Pembelian Voucher Publik (VCR-...)
+        $order = PublicVoucherOrder::where('reference_code', $referenceCode)->first();
+        if ($order) {
+            if ($order->status === 'paid' && !is_null($order->voucher_id)) {
+                return ['ok' => true, 'code' => 200, 'message' => 'Already paid'];
+            }
+
+            if ($isPaid) {
+                $fulfilled = $this->publicVoucherService->fulfillOrder($order, $request->all());
+                return [
+                    'ok'      => true,
+                    'code'    => 200,
+                    'message' => $fulfilled->status === 'paid' ? 'Public voucher fulfilled' : 'Paid but voucher out of stock',
+                ];
+            }
+
+            if ($isFailedOrExpired) {
+                $newStatus = $this->resolveFailedStatus($request);
+                $order->update(['status' => $newStatus, 'payload' => $request->all()]);
+                return ['ok' => true, 'code' => 200, 'message' => "Order marked as {$newStatus}"];
+            }
+
+            return ['ok' => true, 'code' => 200, 'message' => 'Callback ignored (non-final status)'];
         }
 
-        return ['ok' => true, 'code' => 200, 'message' => 'Callback ignored (non-final status)'];
+        return ['ok' => false, 'code' => 404, 'message' => 'Transaction not found'];
+    }
+
+    protected function resolveFailedStatus(Request $request): string
+    {
+        $raw = strtoupper((string) ($request->input('status') ?: $request->input('transaction_status')));
+        return in_array($raw, ['EXPIRED', 'EXPIRE']) ? 'expired' : 'failed';
     }
 }
-

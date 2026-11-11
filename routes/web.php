@@ -13,21 +13,50 @@ use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\PaymentGatewayController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\PackageController;
 use App\Http\Controllers\Api\RouterApiController;
 use App\Http\Controllers\WhatsAppVoucherController;
+use App\Http\Controllers\Portal\PortalAuthController;
+use App\Http\Controllers\Portal\PortalDashboardController;
 
-// Redirect root to dashboard or login
+// Redirect root to dashboard, portal, or login
 Route::get('/', function () {
-    return auth()->check() ? redirect()->route('dashboard') : redirect()->route('login');
+    if (!auth()->check()) {
+        return redirect()->route('login');
+    }
+    $user = auth()->user();
+    if ($user->isCustomer() && !$user->hasAnyRole(['super-admin', 'admin', 'teknisi'])) {
+        return redirect()->route('portal.dashboard');
+    }
+    return redirect()->route('dashboard');
 });
 
-// Auth routes
+// Auth routes (Staff/Admin)
 require __DIR__ . '/auth.php';
 
-// Protected routes - require authentication
-Route::middleware(['auth'])->group(function () {
+// ============================================
+// CUSTOMER PORTAL ROUTES (Login Khusus Pelanggan)
+// ============================================
+Route::prefix('portal')->name('portal.')->group(function () {
+    Route::middleware('guest')->group(function () {
+        Route::get('/login', [PortalAuthController::class, 'showLoginForm'])->name('login');
+        Route::post('/login', [PortalAuthController::class, 'login'])->name('login.submit');
+    });
+
+    Route::middleware(['auth', 'customer.portal'])->group(function () {
+        Route::post('/logout', [PortalAuthController::class, 'logout'])->name('logout');
+        Route::get('/', [PortalDashboardController::class, 'index'])->name('dashboard');
+        Route::post('/vouchers/buy', [PortalDashboardController::class, 'buyVoucher'])->name('vouchers.buy');
+        Route::post('/topup', [PortalDashboardController::class, 'requestTopup'])->name('topup.request');
+        Route::post('/billing/{billing}/pay-with-balance', [PortalDashboardController::class, 'payBillingWithBalance'])->name('billing.pay-balance');
+        Route::post('/profile/password', [PortalDashboardController::class, 'updatePassword'])->name('password.update');
+    });
+});
+
+// Protected routes - require staff/admin authentication
+Route::middleware(['auth', 'staff.only'])->group(function () {
 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
@@ -117,6 +146,11 @@ Route::middleware(['auth'])->group(function () {
     // CUSTOMERS
     // ============================================
     Route::middleware(['can:view customers'])->group(function () {
+        Route::post('/customers/{customer}/topup', [CustomerController::class, 'topup'])->name('customers.topup');
+        Route::post('/customers/{customer}/adjust-balance', [CustomerController::class, 'adjustBalance'])->name('customers.adjust-balance');
+        Route::post('/customers/{customer}/toggle-status', [CustomerController::class, 'toggleStatus'])->name('customers.toggle-status');
+        Route::post('/customers/topups/{topup}/approve', [CustomerController::class, 'approveTopup'])->name('customers.topups.approve');
+        Route::post('/customers/topups/{topup}/reject', [CustomerController::class, 'rejectTopup'])->name('customers.topups.reject');
         Route::resource('customers', CustomerController::class);
     });
 
@@ -127,6 +161,7 @@ Route::middleware(['auth'])->group(function () {
         Route::resource('billing', BillingController::class);
         Route::post('/billing/{billing}/pay', [BillingController::class, 'pay'])->name('billing.pay');
         Route::get('/billing/{billing}/invoice', [BillingController::class, 'invoice'])->name('billing.invoice');
+        Route::post('/billing/{billing}/remind', [BillingController::class, 'sendReminder'])->name('billing.remind');
         Route::post('/billing/generate-monthly', [BillingController::class, 'generateMonthly'])->name('billing.generate-monthly');
     });
 
@@ -183,6 +218,8 @@ Route::middleware(['auth'])->group(function () {
     Route::middleware(['can:view settings'])->group(function () {
         Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
         Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
+        Route::get('/payment-gateway/settings', [PaymentGatewayController::class, 'settings'])->name('payment-gateway.settings');
+        Route::post('/payment-gateway/settings', [PaymentGatewayController::class, 'updateSettings'])->name('payment-gateway.settings.update');
     });
 
     // ============================================
@@ -241,3 +278,9 @@ Route::get('/api/whatsapp/webhook', [\App\Http\Controllers\Api\WhatsAppWebhookCo
 // ============================================
 Route::post('/api/telegram/webhook', [\App\Http\Controllers\Api\TelegramWebhookController::class, 'handle'])
     ->name('api.telegram.webhook');
+
+// ============================================
+// PAYMENT GATEWAY WEBHOOK
+// ============================================
+Route::post('/api/payment-gateway/callback/{provider}', [\App\Http\Controllers\Api\PaymentGatewayWebhookController::class, 'handle'])
+    ->name('api.payment-gateway.callback');

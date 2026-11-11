@@ -531,6 +531,11 @@
                     Masuk ke Dashboard
                 </button>
             </form>
+
+            <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);text-align:center;font-size:13px;color:#94a3b8;">
+                Anda pelanggan WiFi / Voucher?
+                <a href="{{ route('portal.login') }}" style="color:#25d366;font-weight:600;text-decoration:none;margin-left:4px;">Masuk ke Portal Pelanggan &rarr;</a>
+            </div>
         </div>
 
         {{-- Footer --}}

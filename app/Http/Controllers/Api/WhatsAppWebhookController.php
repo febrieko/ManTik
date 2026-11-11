@@ -8,6 +8,7 @@ use App\Models\Package;
 use App\Models\Router;
 use App\Models\Setting;
 use App\Models\Customer;
+use App\Models\CustomerBalanceTransaction;
 use App\Models\WaVoucherRequest;
 use App\Services\MikrotikService;
 use App\Services\WhatsAppService;
@@ -67,42 +68,94 @@ class WhatsAppWebhookController extends Controller
             }
         }
 
+        // Ambil data pesan dari request (Mendukung OpenWA, Fonnte, Wablas, dan generic gateway)
+        $payload = $request->input('payload') ?? $request->input('data') ?? [];
+
         // Abaikan jika pesan dikirim oleh bot/nomor gateway itu sendiri (mencegah auto-reply loop)
-        if ($request->input('payload.fromMe') === true || 
-            $request->input('data.fromMe') === true || 
-            $request->input('fromMe') === true) {
+        if ($request->input('payload.fromMe') === true ||
+            $request->input('data.fromMe') === true ||
+            $request->input('fromMe') === true ||
+            (is_array($payload) && ($payload['direction'] ?? null) === 'outgoing') ||
+            $request->input('direction') === 'outgoing') {
             return response()->json(['status' => 'ignored', 'reason' => 'from_me']);
         }
 
-        // Ambil data pesan dari request (Mendukung OpenWA, Fonnte, Wablas, dan generic gateway)
-        $payload = $request->input('payload') ?? $request->input('data') ?? [];
+        // Abaikan pesan dari Group Chat (@g.us) atau Broadcast (@broadcast)
+        $possibleChatIds = [
+            is_array($payload) ? ($payload['from'] ?? null) : null,
+            is_array($payload) ? ($payload['chatId'] ?? null) : null,
+            $request->input('from'),
+            $request->input('chatId'),
+        ];
+        foreach ($possibleChatIds as $cid) {
+            if (is_string($cid) && (str_contains($cid, '@g.us') || str_contains($cid, '@broadcast'))) {
+                return response()->json(['status' => 'ignored', 'reason' => 'group_or_broadcast']);
+            }
+        }
+        if ($request->input('payload.isGroup') === true || $request->input('data.isGroup') === true || $request->input('isGroup') === true) {
+            return response()->json(['status' => 'ignored', 'reason' => 'group_or_broadcast']);
+        }
 
         $senderPhone = null;
         $senderName  = null;
         $messageBody = null;
         $rawChatId   = null;
+        $lidCandidate = null;
+        $sessionId   = is_array($payload) ? ($payload['sessionId'] ?? $request->input('sessionId')) : $request->input('sessionId');
 
         if (is_array($payload) && !empty($payload)) {
             $rawChatId   = $payload['from'] ?? $payload['chatId'] ?? $payload['sender']['id'] ?? null;
             $messageBody = $payload['body'] ?? $payload['text'] ?? $payload['message'] ?? null;
-            $senderName  = $payload['sender']['pushname'] ?? $payload['sender']['name'] ?? $payload['pushname'] ?? $payload['name'] ?? null;
-
-            // Prioritaskan nomor HP asli dari sender
-            $senderPhone = $payload['sender']['number']
-                ?? $payload['sender']['formattedPhone']
-                ?? $payload['sender']['phoneNumber']
-                ?? $payload['author']
-                ?? $payload['sender']['phone']
+            $senderName  = $payload['sender']['pushname']
+                ?? $payload['sender']['name']
+                ?? $payload['pushname']
+                ?? $payload['name']
+                ?? $payload['chatName']
                 ?? null;
 
-            // Jika senderPhone masih kosong atau berformat LID (@lid), cari yang berformat nomor biasa
-            if (!$senderPhone || str_contains((string)$senderPhone, '@lid')) {
-                if (!empty($payload['author']) && !str_contains($payload['author'], '@lid')) {
-                    $senderPhone = $payload['author'];
-                } elseif (!empty($payload['from']) && !str_contains($payload['from'], '@lid')) {
-                    $senderPhone = $payload['from'];
-                } elseif (!empty($payload['chatId']) && !str_contains($payload['chatId'], '@lid')) {
-                    $senderPhone = $payload['chatId'];
+            // 1. Cari JID nomor asli (@c.us atau @s.whatsapp.net) atau field senderPn
+            $jidCandidates = [
+                $payload['sender']['id'] ?? null,
+                $payload['senderPn'] ?? null,
+                $payload['participantPn'] ?? null,
+                $payload['author'] ?? null,
+                $payload['from'] ?? null,
+                $payload['chatId'] ?? null,
+            ];
+            foreach ($jidCandidates as $candidate) {
+                if (is_string($candidate) && (str_contains($candidate, '@c.us') || str_contains($candidate, '@s.whatsapp.net'))) {
+                    $senderPhone = explode('@', $candidate)[0];
+                    break;
+                }
+            }
+
+            // 2. Cek apakah ada @lid yang perlu di-resolve jika belum menemukan nomor @c.us
+            foreach ($jidCandidates as $candidate) {
+                if (is_string($candidate) && str_contains($candidate, '@lid')) {
+                    $lidCandidate = $candidate;
+                    break;
+                }
+            }
+
+            // 3. Fallback ke field nomor telepon jika bukan merupakan salinan angka LID
+            if (!$senderPhone) {
+                $lidDigits = $lidCandidate ? preg_replace('/\D/', '', $lidCandidate) : null;
+                $numberCandidates = [
+                    $payload['sender']['formattedPhone'] ?? null,
+                    $payload['sender']['phoneNumber'] ?? null,
+                    $payload['sender']['phone'] ?? null,
+                    $payload['sender']['number'] ?? null,
+                ];
+                foreach ($numberCandidates as $num) {
+                    if (!empty($num) && !str_contains((string) $num, '@lid')) {
+                        $cleanNum = preg_replace('/\D/', '', (string) $num);
+                        // Di OpenWA, sender.number sering berisi angka LID. Abaikan jika sama dengan angka LID!
+                        if ($lidDigits && $cleanNum === $lidDigits) {
+                            continue;
+                        }
+                        $senderPhone = $num;
+                        break;
+                    }
                 }
             }
         }
@@ -110,15 +163,70 @@ class WhatsAppWebhookController extends Controller
         if (!$senderPhone) {
             $senderRaw = $request->input('sender');
             if (is_array($senderRaw)) {
-                $senderPhone = $senderRaw['number'] ?? $senderRaw['formattedPhone'] ?? $senderRaw['phoneNumber'] ?? $senderRaw['phone'] ?? $senderRaw['id'] ?? null;
-                $senderName  = $senderName ?: ($senderRaw['pushname'] ?? $senderRaw['name'] ?? null);
+                $idOrJid = $senderRaw['id'] ?? null;
+                if (is_string($idOrJid) && str_contains($idOrJid, '@lid')) {
+                    $lidCandidate = $lidCandidate ?: $idOrJid;
+                } elseif (is_string($idOrJid) && (str_contains($idOrJid, '@c.us') || str_contains($idOrJid, '@s.whatsapp.net'))) {
+                    $senderPhone = explode('@', $idOrJid)[0];
+                }
+
+                if (!$senderPhone) {
+                    $lidDigits = $lidCandidate ? preg_replace('/\D/', '', $lidCandidate) : null;
+                    $rawCandidates = [
+                        $senderRaw['formattedPhone'] ?? null,
+                        $senderRaw['phoneNumber'] ?? null,
+                        $senderRaw['phone'] ?? null,
+                        $senderRaw['number'] ?? null,
+                    ];
+                    foreach ($rawCandidates as $num) {
+                        if (!empty($num) && !str_contains((string) $num, '@lid')) {
+                            $cleanNum = preg_replace('/\D/', '', (string) $num);
+                            if ($lidDigits && $cleanNum === $lidDigits) {
+                                continue;
+                            }
+                            $senderPhone = $num;
+                            break;
+                        }
+                    }
+                }
+                $senderName = $senderName ?: ($senderRaw['pushname'] ?? $senderRaw['name'] ?? null);
             } else {
-                $senderPhone = $senderRaw ?? $request->input('from') ?? $request->input('phone');
+                $topFrom = $senderRaw ?? $request->input('from') ?? $request->input('phone');
+                if (is_string($topFrom) && str_contains($topFrom, '@lid')) {
+                    $lidCandidate = $lidCandidate ?: $topFrom;
+                } else {
+                    $senderPhone = $topFrom;
+                }
+            }
+        }
+
+        // Jika masih berupa LID (atau tidak ada senderPhone selain LID), resolve lewat OpenWA Contacts API
+        if (!$senderPhone && $lidCandidate) {
+            $resolved = $this->wa->resolveOpenWaLid($lidCandidate, $sessionId);
+            if ($resolved && !empty($resolved['phone'])) {
+                $senderPhone = $resolved['phone'];
+                if (empty($senderName) && !empty($resolved['name'])) {
+                    $senderName = $resolved['name'];
+                }
+            } else {
+                $senderPhone = $lidCandidate;
             }
         }
 
         if (!$senderPhone && $rawChatId) {
-            $senderPhone = $rawChatId;
+            if (str_contains((string) $rawChatId, '@lid')) {
+                $resolved = $this->wa->resolveOpenWaLid((string) $rawChatId, $sessionId);
+                if ($resolved && !empty($resolved['phone'])) {
+                    $senderPhone = $resolved['phone'];
+                    if (empty($senderName) && !empty($resolved['name'])) {
+                        $senderName = $resolved['name'];
+                    }
+                } else {
+                    $senderPhone = $rawChatId;
+                }
+            } else {
+                $senderPhone = $rawChatId;
+            }
         }
 
         if (empty($messageBody)) {
@@ -392,7 +500,9 @@ class WhatsAppWebhookController extends Controller
             }
 
             // 1. Potong Saldo Customer
-            $lockedCustomer->decrement('balance', $order['price']);
+            $balanceBefore = (float) $lockedCustomer->balance;
+            $balanceAfter  = $balanceBefore - (float) $order['price'];
+            $lockedCustomer->update(['balance' => $balanceAfter]);
 
             // 2. Tandai Voucher Terpakai
             $expiresAt = now()->addDays($package->duration_days);
@@ -404,7 +514,7 @@ class WhatsAppWebhookController extends Controller
             ]);
 
             // 3. Catat di WaVoucherRequest
-            WaVoucherRequest::create([
+            $waReq = WaVoucherRequest::create([
                 'phone'          => $phone,
                 'customer_id'    => $lockedCustomer->id,
                 'requester_name' => $order['requester_name'] ?: $lockedCustomer->name,
@@ -415,6 +525,19 @@ class WhatsAppWebhookController extends Controller
                 'price_deducted' => $order['price'],
                 'status'         => 'success',
                 'raw_message'    => "CONFIRM_BUY#{$expectedCode}",
+            ]);
+
+            // 4. Catat di Buku Mutasi Saldo Pelanggan
+            CustomerBalanceTransaction::create([
+                'customer_id'    => $lockedCustomer->id,
+                'type'           => 'debit',
+                'category'       => 'voucher_wa',
+                'amount'         => $order['price'],
+                'balance_before' => $balanceBefore,
+                'balance_after'  => $balanceAfter,
+                'reference_type' => WaVoucherRequest::class,
+                'reference_id'   => $waReq->id,
+                'notes'          => "Beli voucher {$package->name} ({$voucher->code}) via WhatsApp",
             ]);
 
             // Hapus cache sesi pesanan

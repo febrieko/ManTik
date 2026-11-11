@@ -128,6 +128,77 @@ class WhatsAppService
     }
 
     /**
+     * Dapatkan base URL API OpenWA (berakhir di /api).
+     */
+    public function getOpenWaBaseApiUrl(): string
+    {
+        $url = rtrim($this->apiUrl, '/');
+        if (str_contains($url, '/sessions/')) {
+            $url = substr($url, 0, strpos($url, '/sessions/'));
+        }
+        if (!str_ends_with($url, '/api')) {
+            $url .= '/api';
+        }
+        return $url;
+    }
+
+    /**
+     * Resolve WhatsApp LID (@lid) menjadi nomor telepon asli dan nama kontak via OpenWA API.
+     *
+     * @return array{phone: string, name: ?string}|null
+     */
+    public function resolveOpenWaLid(string $lid, ?string $sessionId = null): ?array
+    {
+        if (empty($lid) || !$this->isOpenWa() || empty($this->apiUrl) || empty($this->apiKey)) {
+            return null;
+        }
+
+        $lidFormatted = str_contains($lid, '@lid') ? $lid : "{$lid}@lid";
+        $cacheKey = 'openwa_lid_resolved_' . md5($lidFormatted);
+
+        if ($cached = cache($cacheKey)) {
+            return $cached;
+        }
+
+        try {
+            $baseApi = $this->getOpenWaBaseApiUrl();
+            $baseRoot = preg_replace('~/api$~', '', $baseApi);
+            $resolvedSessionId = $sessionId ?: $this->resolveOpenWaSessionId($baseRoot);
+
+            $contactUrl = "{$baseApi}/sessions/{$resolvedSessionId}/contacts/" . urlencode($lidFormatted);
+            $response = Http::timeout(5)
+                ->withHeaders([
+                    'X-API-Key' => $this->apiKey,
+                    'Accept'    => 'application/json',
+                ])
+                ->get($contactUrl);
+
+            if ($response->successful()) {
+                $data = $response->json();
+                $contactId = $data['id'] ?? '';
+                if (str_contains($contactId, '@c.us') || str_contains($contactId, '@s.whatsapp.net')) {
+                    $rawPhone = explode('@', $contactId)[0];
+                    $phone = $this->normalizePhone($rawPhone);
+
+                    if (!empty($phone)) {
+                        $result = [
+                            'phone' => $phone,
+                            'name'  => $data['name'] ?? $data['pushName'] ?? $data['pushname'] ?? null,
+                        ];
+                        cache([$cacheKey => $result], now()->addHours(24));
+                        Log::info("[WhatsApp] LID {$lidFormatted} berhasil di-resolve menjadi {$phone}");
+                        return $result;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning("[WhatsApp] Gagal resolve LID {$lidFormatted}: " . $e->getMessage());
+        }
+
+        return null;
+    }
+
+    /**
      * Kirim pesan WhatsApp ke nomor atau chatId tertentu.
      */
     public function sendMessage(string $to, string $message, ?string $targetChatId = null): array

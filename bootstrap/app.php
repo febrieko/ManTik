@@ -17,6 +17,8 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'teknisi.router.scope' => \App\Http\Middleware\TeknisiRouterScope::class,
+            'customer.portal'      => \App\Http\Middleware\EnsureCustomerPortal::class,
+            'staff.only'           => \App\Http\Middleware\RedirectCustomerFromAdmin::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {

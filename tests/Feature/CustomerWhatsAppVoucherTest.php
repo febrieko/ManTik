@@ -11,6 +11,7 @@ use App\Models\WaVoucherRequest;
 use App\Models\Setting;
 use Illuminate\Foundation\Testing\DatabaseTransactions;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 
 class CustomerWhatsAppVoucherTest extends TestCase
 {
@@ -19,6 +20,7 @@ class CustomerWhatsAppVoucherTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Http::fake(['*' => Http::response(['status' => 'sent'], 200)]);
         Setting::set('whatsapp_webhook_secret', '', 'whatsapp');
         Cache::flush();
     }
@@ -193,6 +195,17 @@ class CustomerWhatsAppVoucherTest extends TestCase
         $this->assertEquals($customer->id, $requestLog->customer_id);
         $this->assertEquals(10000, (float) $requestLog->price_deducted);
         $this->assertEquals('success', $requestLog->status);
+
+        // Pastikan mutasi saldo tercatat di buku mutasi (ledger)
+        $this->assertDatabaseHas('customer_balance_transactions', [
+            'customer_id'    => $customer->id,
+            'type'           => 'debit',
+            'category'       => 'voucher_wa',
+            'amount'         => 10000,
+            'balance_before' => 20000,
+            'balance_after'  => 10000,
+            'reference_id'   => $requestLog->id,
+        ]);
     }
 
     public function test_customer_can_cancel_pending_order(): void

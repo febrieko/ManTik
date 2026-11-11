@@ -41,6 +41,11 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
+        $user = auth()->user();
+        if ($user->isCustomer() && !$user->hasAnyRole(['super-admin', 'admin', 'teknisi'])) {
+            return redirect()->route('portal.dashboard');
+        }
+
         return redirect()->intended(route('dashboard'));
     }
 

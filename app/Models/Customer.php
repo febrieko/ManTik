@@ -12,7 +12,7 @@ class Customer extends Model
 
     protected $fillable = [
         'user_id', 'name', 'email', 'phone', 'telegram_chat_id', 'address', 
-        'nik', 'status', 'balance', 'profile_photo',
+        'nik', 'status', 'customer_type', 'balance', 'profile_photo',
     ];
 
     protected $casts = [
@@ -44,6 +44,21 @@ class Customer extends Model
         return $this->hasMany(Billing::class)->whereIn('status', ['unpaid', 'partial', 'overdue']);
     }
 
+    public function balanceTransactions()
+    {
+        return $this->hasMany(CustomerBalanceTransaction::class)->orderByDesc('created_at')->orderByDesc('id');
+    }
+
+    public function topupTransactions()
+    {
+        return $this->hasMany(TopupTransaction::class)->orderByDesc('created_at')->orderByDesc('id');
+    }
+
+    public function waVoucherRequests()
+    {
+        return $this->hasMany(WaVoucherRequest::class)->orderByDesc('created_at')->orderByDesc('id');
+    }
+
     public function getActivePackageAttribute()
     {
         return $this->pppoeUsers()->with('package')->first()?->package
@@ -51,23 +66,34 @@ class Customer extends Model
     }
 
     /**
-     * Mutator kolom phone: otomatis normalisasi penulisan 0 atau 62 menjadi format standar 62...
+     * Normalisasi nomor telepon ke format internasional 62...
      */
-    public function setPhoneAttribute($value): void
+    public static function normalizePhoneNumber(?string $value): ?string
     {
         if (empty($value)) {
-            $this->attributes['phone'] = null;
-            return;
+            return null;
         }
 
-        $clean = preg_replace('/\D/', '', $value);
+        $clean = preg_replace('/\D/', '', (string) $value);
+        if (empty($clean)) {
+            return null;
+        }
+
         if (str_starts_with($clean, '0')) {
             $clean = '62' . substr($clean, 1);
         } elseif (str_starts_with($clean, '8') && strlen($clean) >= 9) {
             $clean = '62' . $clean;
         }
 
-        $this->attributes['phone'] = $clean ?: null;
+        return $clean ?: null;
+    }
+
+    /**
+     * Mutator kolom phone: otomatis normalisasi penulisan 0 atau 62 menjadi format standar 62...
+     */
+    public function setPhoneAttribute($value): void
+    {
+        $this->attributes['phone'] = static::normalizePhoneNumber($value);
     }
 }
 

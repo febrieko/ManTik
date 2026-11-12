@@ -30,9 +30,10 @@ class HotspotVoucherRouteTest extends TestCase
 
     public function test_hotspot_generate_vouchers_page_is_accessible(): void
     {
-        $permission = Permission::firstOrCreate(['name' => 'view hotspot']);
+        $viewPerm = Permission::firstOrCreate(['name' => 'view hotspot']);
+        $createPerm = Permission::firstOrCreate(['name' => 'create hotspot']);
         $role = Role::firstOrCreate(['name' => 'admin']);
-        $role->givePermissionTo($permission);
+        $role->givePermissionTo([$viewPerm, $createPerm]);
 
         $user = User::factory()->create();
         $user->assignRole($role);

@@ -45,13 +45,19 @@ class BillingAndPaymentGatewayTest extends TestCase
             '*' => Http::response(['status' => 'sent'], 200),
         ]);
 
-        foreach (['view billing', 'view settings', 'view customers', 'view dashboard'] as $perm) {
+        foreach ([
+            'view billing', 'create billing', 'edit billing', 'delete billing',
+            'view settings', 'edit settings', 'view customers', 'view dashboard',
+        ] as $perm) {
             Permission::firstOrCreate(['name' => $perm]);
         }
 
         $adminRole    = Role::firstOrCreate(['name' => 'admin']);
         $customerRole = Role::firstOrCreate(['name' => 'customer']);
-        $adminRole->givePermissionTo(['view billing', 'view settings', 'view customers', 'view dashboard']);
+        $adminRole->givePermissionTo([
+            'view billing', 'create billing', 'edit billing', 'delete billing',
+            'view settings', 'edit settings', 'view customers', 'view dashboard',
+        ]);
 
         $this->adminUser = User::create([
             'name'      => 'Admin Billing',

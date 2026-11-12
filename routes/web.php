@@ -75,52 +75,109 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     // ROUTER MANAGEMENT
     // ============================================
-    Route::resource('routers', RouterController::class);
-    Route::post('/routers/{router}/test-connection', [RouterController::class, 'testConnection'])->name('routers.test');
+    Route::middleware([\App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
+        Route::middleware(['can:create routers'])->group(function () {
+            Route::get('/routers/create', [RouterController::class, 'create'])->name('routers.create');
+            Route::post('/routers', [RouterController::class, 'store'])->name('routers.store');
+        });
+        Route::middleware(['can:edit routers'])->group(function () {
+            Route::get('/routers/{router}/edit', [RouterController::class, 'edit'])->name('routers.edit');
+            Route::match(['put', 'patch'], '/routers/{router}', [RouterController::class, 'update'])->name('routers.update');
+            Route::post('/routers/{router}/test-connection', [RouterController::class, 'testConnection'])->name('routers.test');
+        });
+        Route::middleware(['can:delete routers'])->group(function () {
+            Route::delete('/routers/{router}', [RouterController::class, 'destroy'])->name('routers.destroy');
+        });
+        Route::middleware(['can:view routers'])->group(function () {
+            Route::get('/routers', [RouterController::class, 'index'])->name('routers.index');
+            Route::get('/routers/{router}', [RouterController::class, 'show'])->name('routers.show');
+        });
+    });
 
     // ============================================
     // ROUTER STATUS & UPTIME MONITORING
     // ============================================
-    Route::prefix('router-status')->name('router-status.')->group(function () {
-        Route::get('/', [\App\Http\Controllers\RouterStatusController::class, 'index'])->name('index');
-        Route::post('/check-all', [\App\Http\Controllers\RouterStatusController::class, 'checkAll'])->name('check-all');
-        Route::post('/{router}/check', [\App\Http\Controllers\RouterStatusController::class, 'checkSingle'])->name('check');
-        Route::get('/{router}', [\App\Http\Controllers\RouterStatusController::class, 'show'])->name('show');
-    });
+    Route::middleware(['can:view routers', \App\Http\Middleware\TeknisiRouterScope::class])
+        ->prefix('router-status')
+        ->name('router-status.')
+        ->group(function () {
+            Route::get('/', [\App\Http\Controllers\RouterStatusController::class, 'index'])->name('index');
+            Route::post('/check-all', [\App\Http\Controllers\RouterStatusController::class, 'checkAll'])->name('check-all');
+            Route::post('/{router}/check', [\App\Http\Controllers\RouterStatusController::class, 'checkSingle'])->name('check');
+            Route::get('/{router}', [\App\Http\Controllers\RouterStatusController::class, 'show'])->name('show');
+        });
 
     // ============================================
     // PPPOE MANAGEMENT
     // ============================================
-    Route::middleware(['can:view pppoe', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        Route::post('/pppoe/sync-router/{router}', [PppoeController::class, 'syncFromRouter'])->name('pppoe.sync-router');
-        Route::post('/pppoe/{pppoeUser}/toggle', [PppoeController::class, 'toggle'])->name('pppoe.toggle');
-        Route::post('/pppoe/{pppoeUser}/sync', [PppoeController::class, 'sync'])->name('pppoe.sync');
-        Route::resource('pppoe', PppoeController::class)->except(['show']);
+    Route::middleware([\App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
+        Route::middleware(['can:create pppoe'])->group(function () {
+            Route::get('/pppoe/create', [PppoeController::class, 'create'])->name('pppoe.create');
+            Route::post('/pppoe', [PppoeController::class, 'store'])->name('pppoe.store');
+        });
+        Route::middleware(['can:edit pppoe'])->group(function () {
+            Route::post('/pppoe/sync-router/{router}', [PppoeController::class, 'syncFromRouter'])->name('pppoe.sync-router');
+            Route::post('/pppoe/{pppoeUser}/toggle', [PppoeController::class, 'toggle'])->name('pppoe.toggle');
+            Route::post('/pppoe/{pppoeUser}/sync', [PppoeController::class, 'sync'])->name('pppoe.sync');
+            Route::get('/pppoe/{pppoe}/edit', [PppoeController::class, 'edit'])->name('pppoe.edit');
+            Route::match(['put', 'patch'], '/pppoe/{pppoe}', [PppoeController::class, 'update'])->name('pppoe.update');
+        });
+        Route::middleware(['can:delete pppoe'])->group(function () {
+            Route::delete('/pppoe/{pppoe}', [PppoeController::class, 'destroy'])->name('pppoe.destroy');
+        });
+        Route::middleware(['can:view pppoe'])->group(function () {
+            Route::get('/pppoe', [PppoeController::class, 'index'])->name('pppoe.index');
+        });
     });
 
     // ============================================
     // HOTSPOT MANAGEMENT
     // ============================================
-    Route::middleware(['can:view hotspot', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        // Vouchers (diletakkan sebelum resource agar tidak tertangkap oleh parameter /hotspot/{hotspot})
-        Route::get('/hotspot/vouchers', [HotspotController::class, 'vouchers'])->name('hotspot.vouchers');
-        Route::get('/hotspot/vouchers/generate', [HotspotController::class, 'generateVouchers'])->name('hotspot.vouchers.generate');
-        Route::post('/hotspot/vouchers/store', [HotspotController::class, 'storeVouchers'])->name('hotspot.vouchers.store');
-        Route::get('/hotspot/vouchers/{voucher}/print', [HotspotController::class, 'printVoucher'])->name('hotspot.vouchers.print');
-        Route::post('/hotspot/vouchers/print-bulk', [HotspotController::class, 'printBulk'])->name('hotspot.vouchers.print-bulk');
-
-        Route::post('/hotspot/sync-router/{router}', [HotspotController::class, 'syncFromRouter'])->name('hotspot.sync-router');
-        Route::post('/hotspot/{hotspot}/toggle', [HotspotController::class, 'toggle'])->name('hotspot.toggle');
-        Route::resource('hotspot', HotspotController::class)->except(['show']);
+    Route::middleware([\App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
+        // Vouchers (diletakkan sebelum wildcard /hotspot/{hotspot})
+        Route::middleware(['can:create hotspot'])->group(function () {
+            Route::get('/hotspot/vouchers/generate', [HotspotController::class, 'generateVouchers'])->name('hotspot.vouchers.generate');
+            Route::post('/hotspot/vouchers/store', [HotspotController::class, 'storeVouchers'])->name('hotspot.vouchers.store');
+            Route::get('/hotspot/create', [HotspotController::class, 'create'])->name('hotspot.create');
+            Route::post('/hotspot', [HotspotController::class, 'store'])->name('hotspot.store');
+        });
+        Route::middleware(['can:edit hotspot'])->group(function () {
+            Route::post('/hotspot/sync-router/{router}', [HotspotController::class, 'syncFromRouter'])->name('hotspot.sync-router');
+            Route::post('/hotspot/{hotspot}/toggle', [HotspotController::class, 'toggle'])->name('hotspot.toggle');
+            Route::get('/hotspot/{hotspot}/edit', [HotspotController::class, 'edit'])->name('hotspot.edit');
+            Route::match(['put', 'patch'], '/hotspot/{hotspot}', [HotspotController::class, 'update'])->name('hotspot.update');
+        });
+        Route::middleware(['can:delete hotspot'])->group(function () {
+            Route::delete('/hotspot/{hotspot}', [HotspotController::class, 'destroy'])->name('hotspot.destroy');
+        });
+        Route::middleware(['can:view hotspot'])->group(function () {
+            Route::get('/hotspot/vouchers', [HotspotController::class, 'vouchers'])->name('hotspot.vouchers');
+            Route::get('/hotspot/vouchers/{voucher}/print', [HotspotController::class, 'printVoucher'])->name('hotspot.vouchers.print');
+            Route::post('/hotspot/vouchers/print-bulk', [HotspotController::class, 'printBulk'])->name('hotspot.vouchers.print-bulk');
+            Route::get('/hotspot', [HotspotController::class, 'index'])->name('hotspot.index');
+        });
     });
 
     // ============================================
     // QUEUE / BANDWIDTH MANAGEMENT
     // ============================================
-    Route::middleware(['can:view queue', \App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
-        Route::post('/queue/sync-router/{router}', [QueueController::class, 'syncFromRouter'])->name('queue.sync-router');
-        Route::post('/queue/{queue}/toggle', [QueueController::class, 'toggle'])->name('queue.toggle');
-        Route::resource('queue', QueueController::class)->except(['show']);
+    Route::middleware([\App\Http\Middleware\TeknisiRouterScope::class])->group(function () {
+        Route::middleware(['can:create queue'])->group(function () {
+            Route::get('/queue/create', [QueueController::class, 'create'])->name('queue.create');
+            Route::post('/queue', [QueueController::class, 'store'])->name('queue.store');
+        });
+        Route::middleware(['can:edit queue'])->group(function () {
+            Route::post('/queue/sync-router/{router}', [QueueController::class, 'syncFromRouter'])->name('queue.sync-router');
+            Route::post('/queue/{queue}/toggle', [QueueController::class, 'toggle'])->name('queue.toggle');
+            Route::get('/queue/{queue}/edit', [QueueController::class, 'edit'])->name('queue.edit');
+            Route::match(['put', 'patch'], '/queue/{queue}', [QueueController::class, 'update'])->name('queue.update');
+        });
+        Route::middleware(['can:delete queue'])->group(function () {
+            Route::delete('/queue/{queue}', [QueueController::class, 'destroy'])->name('queue.destroy');
+        });
+        Route::middleware(['can:view queue'])->group(function () {
+            Route::get('/queue', [QueueController::class, 'index'])->name('queue.index');
+        });
     });
 
     // ============================================
@@ -156,26 +213,50 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     // CUSTOMERS
     // ============================================
-    Route::middleware(['can:view customers'])->group(function () {
+    Route::middleware(['can:create customers'])->group(function () {
+        Route::get('/customers/create', [CustomerController::class, 'create'])->name('customers.create');
+        Route::post('/customers', [CustomerController::class, 'store'])->name('customers.store');
+    });
+    Route::middleware(['can:edit customers'])->group(function () {
+        Route::get('/customers/{customer}/edit', [CustomerController::class, 'edit'])->name('customers.edit');
+        Route::match(['put', 'patch'], '/customers/{customer}', [CustomerController::class, 'update'])->name('customers.update');
         Route::post('/customers/{customer}/topup', [CustomerController::class, 'topup'])->name('customers.topup');
         Route::post('/customers/{customer}/adjust-balance', [CustomerController::class, 'adjustBalance'])->name('customers.adjust-balance');
         Route::post('/customers/{customer}/toggle-status', [CustomerController::class, 'toggleStatus'])->name('customers.toggle-status');
         Route::post('/customers/topups/{topup}/approve', [CustomerController::class, 'approveTopup'])->name('customers.topups.approve');
         Route::post('/customers/topups/{topup}/reject', [CustomerController::class, 'rejectTopup'])->name('customers.topups.reject');
-        Route::resource('customers', CustomerController::class);
+    });
+    Route::middleware(['can:delete customers'])->group(function () {
+        Route::delete('/customers/{customer}', [CustomerController::class, 'destroy'])->name('customers.destroy');
+    });
+    Route::middleware(['can:view customers'])->group(function () {
+        Route::get('/customers', [CustomerController::class, 'index'])->name('customers.index');
+        Route::get('/customers/{customer}', [CustomerController::class, 'show'])->name('customers.show');
     });
 
     // ============================================
     // BILLING
     // ============================================
-    Route::middleware(['can:view billing'])->group(function () {
-        Route::resource('billing', BillingController::class);
-        Route::post('/billing/{billing}/pay', [BillingController::class, 'pay'])->name('billing.pay');
-        Route::get('/billing/{billing}/invoice', [BillingController::class, 'invoice'])->name('billing.invoice');
-        Route::post('/billing/{billing}/remind', [BillingController::class, 'sendReminder'])->name('billing.remind');
+    Route::middleware(['can:create billing'])->group(function () {
+        Route::get('/billing/create', [BillingController::class, 'create'])->name('billing.create');
+        Route::post('/billing', [BillingController::class, 'store'])->name('billing.store');
         Route::post('/billing/generate-monthly', [BillingController::class, 'generateMonthly'])->name('billing.generate-monthly');
-        Route::get('/public-orders', [PublicVoucherController::class, 'adminIndex'])->name('public-orders.index');
+    });
+    Route::middleware(['can:edit billing'])->group(function () {
+        Route::get('/billing/{billing}/edit', [BillingController::class, 'edit'])->name('billing.edit');
+        Route::match(['put', 'patch'], '/billing/{billing}', [BillingController::class, 'update'])->name('billing.update');
+        Route::post('/billing/{billing}/pay', [BillingController::class, 'pay'])->name('billing.pay');
+        Route::post('/billing/{billing}/remind', [BillingController::class, 'sendReminder'])->name('billing.remind');
         Route::post('/public-orders/{order}/retry-fulfill', [PublicVoucherController::class, 'retryFulfill'])->name('public-orders.retry-fulfill');
+    });
+    Route::middleware(['can:delete billing'])->group(function () {
+        Route::delete('/billing/{billing}', [BillingController::class, 'destroy'])->name('billing.destroy');
+    });
+    Route::middleware(['can:view billing'])->group(function () {
+        Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
+        Route::get('/billing/{billing}/invoice', [BillingController::class, 'invoice'])->name('billing.invoice');
+        Route::get('/billing/{billing}', [BillingController::class, 'show'])->name('billing.show');
+        Route::get('/public-orders', [PublicVoucherController::class, 'adminIndex'])->name('public-orders.index');
     });
 
     // ============================================
@@ -186,6 +267,8 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
         Route::get('/reports/pppoe', [ReportController::class, 'pppoe'])->name('reports.pppoe');
         Route::get('/reports/billing', [ReportController::class, 'billing'])->name('reports.billing');
         Route::get('/reports/traffic', [ReportController::class, 'traffic'])->name('reports.traffic');
+    });
+    Route::middleware(['can:export reports'])->group(function () {
         Route::get('/reports/export/pdf', [ReportController::class, 'exportPdf'])->name('reports.export.pdf');
         Route::get('/reports/export/excel', [ReportController::class, 'exportExcel'])->name('reports.export.excel');
     });
@@ -193,13 +276,26 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     // USERS MANAGEMENT
     // ============================================
-    Route::middleware(['can:view users'])->group(function () {
-        Route::resource('users', UserController::class);
+    Route::middleware(['can:create users'])->group(function () {
+        Route::get('/users/create', [UserController::class, 'create'])->name('users.create');
+        Route::post('/users', [UserController::class, 'store'])->name('users.store');
+    });
+    Route::middleware(['can:edit users'])->group(function () {
+        Route::get('/users/{user}/edit', [UserController::class, 'edit'])->name('users.edit');
+        Route::match(['put', 'patch'], '/users/{user}', [UserController::class, 'update'])->name('users.update');
         Route::put('/users/{user}/password', [UserController::class, 'updatePassword'])->name('users.update-password');
-        
+    });
+    Route::middleware(['can:delete users'])->group(function () {
+        Route::delete('/users/{user}', [UserController::class, 'destroy'])->name('users.destroy');
+    });
+    Route::middleware(['can:manage user router assignments'])->group(function () {
         Route::get('/users/{user}/router-assignments', [\App\Http\Controllers\UserRouterAssignmentController::class, 'index'])->name('users.router-assignments');
         Route::post('/users/{user}/router-assignments', [\App\Http\Controllers\UserRouterAssignmentController::class, 'assign'])->name('users.router-assignments.assign');
         Route::delete('/users/{user}/router-assignments/{router}', [\App\Http\Controllers\UserRouterAssignmentController::class, 'revoke'])->name('users.router-assignments.revoke');
+    });
+    Route::middleware(['can:view users'])->group(function () {
+        Route::get('/users', [UserController::class, 'index'])->name('users.index');
+        Route::get('/users/{user}', [UserController::class, 'show'])->name('users.show');
     });
 
     // ============================================
@@ -211,15 +307,19 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     // PACKAGES / PROFILES
     // ============================================
-    Route::resource('packages', PackageController::class);
-    Route::post('/packages/{package}/toggle', [PackageController::class, 'toggle'])->name('packages.toggle');
-    Route::post('/packages/sync-router', [PackageController::class, 'syncFromRouter'])->name('packages.sync-router');
+    Route::middleware(['role:super-admin|admin'])->group(function () {
+        Route::resource('packages', PackageController::class);
+        Route::post('/packages/{package}/toggle', [PackageController::class, 'toggle'])->name('packages.toggle');
+        Route::post('/packages/sync-router', [PackageController::class, 'syncFromRouter'])->name('packages.sync-router');
+    });
 
     // ============================================
     // NOTIFICATIONS
     // ============================================
     Route::middleware(['can:view notifications'])->group(function () {
         Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
+    });
+    Route::middleware(['can:send notifications'])->group(function () {
         Route::post('/notifications/test', [NotificationController::class, 'test'])->name('notifications.test');
         Route::post('/notifications/settings', [NotificationController::class, 'updateSettings'])->name('notifications.settings.update');
         Route::post('/notifications/scan-customers', [NotificationController::class, 'scanCustomers'])->name('notifications.scan-customers');
@@ -230,15 +330,17 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     Route::middleware(['can:view settings'])->group(function () {
         Route::get('/settings', [SettingController::class, 'index'])->name('settings.index');
-        Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
         Route::get('/payment-gateway/settings', [PaymentGatewayController::class, 'settings'])->name('payment-gateway.settings');
+    });
+    Route::middleware(['can:edit settings'])->group(function () {
+        Route::post('/settings', [SettingController::class, 'update'])->name('settings.update');
         Route::post('/payment-gateway/settings', [PaymentGatewayController::class, 'updateSettings'])->name('payment-gateway.settings.update');
     });
 
     // ============================================
     // WHATSAPP VOUCHER GATEWAY
     // ============================================
-    Route::prefix('whatsapp')->name('whatsapp.')->group(function () {
+    Route::middleware(['role:super-admin|admin'])->prefix('whatsapp')->name('whatsapp.')->group(function () {
         Route::get('/voucher-requests', [WhatsAppVoucherController::class, 'index'])->name('voucher-requests');
         Route::get('/settings', [WhatsAppVoucherController::class, 'settings'])->name('settings');
         Route::post('/settings', [WhatsAppVoucherController::class, 'updateSettings'])->name('settings.update');
@@ -249,7 +351,7 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
     // ============================================
     // TELEGRAM BOT GATEWAY
     // ============================================
-    Route::prefix('telegram')->name('telegram.')->group(function () {
+    Route::middleware(['role:super-admin|admin'])->prefix('telegram')->name('telegram.')->group(function () {
         Route::get('/settings', [\App\Http\Controllers\TelegramAdminController::class, 'settings'])->name('settings');
         Route::post('/settings', [\App\Http\Controllers\TelegramAdminController::class, 'updateSettings'])->name('settings.update');
         Route::post('/settings/webhook', [\App\Http\Controllers\TelegramAdminController::class, 'setWebhook'])->name('set-webhook');
@@ -263,7 +365,7 @@ Route::middleware(['auth', 'staff.only'])->group(function () {
 // ============================================
 // API ROUTES (for AJAX / frontend use)
 // ============================================
-Route::middleware(['auth'])->prefix('api')->name('api.')->group(function () {
+Route::middleware(['auth', 'staff.only'])->prefix('api')->name('api.')->group(function () {
     Route::get('/routers/status', [RouterApiController::class, 'status'])->name('routers.status');
     Route::get('/routers/{router}/stats', [RouterApiController::class, 'stats'])->name('routers.stats');
     Route::get('/routers/{router}/live-stats', [RouterApiController::class, 'liveStats'])->name('routers.live-stats');

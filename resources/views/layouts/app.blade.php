@@ -58,6 +58,7 @@
                     </span>
                     <span>Dashboard</span>
                 </a>
+                @can('view routers')
                 <a href="{{ route('routers.index') }}" class="nav-item {{ request()->routeIs('routers.*') ? 'active' : '' }}">
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -67,7 +68,6 @@
                     <span>Router</span>
                     @if(isset($onlineRouters)) <span class="nav-badge success">{{ $onlineRouters }}</span> @endif
                 </a>
-                @if(auth()->check() && (auth()->user()->isSuperAdmin() || auth()->user()->isAdmin() || auth()->user()->isTeknisi()))
                 <a href="{{ route('router-status.index') }}" class="nav-item {{ request()->routeIs('router-status.*') ? 'active' : '' }}">
                     <span class="nav-icon" style="color: #00d4ff;">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -77,7 +77,7 @@
                     <span>Status & Uptime</span>
                     <span class="nav-badge" style="background:rgba(0,212,255,0.15);color:#00d4ff;border:1px solid rgba(0,212,255,0.3);">LIVE</span>
                 </a>
-                @endif
+                @endcan
             </div>
 
             <div class="nav-section">
@@ -158,6 +158,7 @@
                     <span>Pelanggan</span>
                 </a>
                 @endcan
+                @hasanyrole('super-admin|admin')
                 <a href="{{ route('packages.index') }}" class="nav-item {{ request()->routeIs('packages.*') ? 'active' : '' }}">
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -168,6 +169,7 @@
                     </span>
                     <span>Paket Layanan</span>
                 </a>
+                @endhasanyrole
                 @can('view billing')
                 <a href="{{ route('billing.index') }}" class="nav-item {{ request()->routeIs('billing.*') ? 'active' : '' }}">
                     <span class="nav-icon">
@@ -198,6 +200,7 @@
                     <span>Laporan</span>
                 </a>
                 @endcan
+                @hasanyrole('super-admin|admin')
                 <a href="{{ route('whatsapp.voucher-requests') }}" class="nav-item {{ request()->routeIs('whatsapp.*') ? 'active' : '' }}">
                     <span class="nav-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -224,6 +227,7 @@
                         <a href="{{ route('telegram.settings') }}" style="color:var(--text-muted);font-size:13px;text-decoration:none;">⚙️ Pengaturan Bot</a>
                     </div>
                 </div>
+                @endhasanyrole
             </div>
 
             <div class="nav-section">

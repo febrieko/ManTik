@@ -9,12 +9,14 @@
         <h2>Manajemen Pengguna & Hak Akses</h2>
         <p>Kelola akun Super Admin, Admin, dan Teknisi serta hak akses perangkat dan kontak notifikasi</p>
     </div>
+    @can('create users')
     <div class="d-flex gap-8">
         <a href="{{ route('users.create') }}" class="btn btn-primary btn-lg" style="box-shadow: 0 4px 15px rgba(0, 212, 255, 0.3);">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
             Tambah Pengguna Baru
         </a>
     </div>
+    @endcan
 </div>
 
 @if(session('success'))
@@ -144,39 +146,50 @@
                         @endif
                     </td>
                     <td>
+                        @php $canManageTarget = !$user->isSuperAdmin() || auth()->user()->isSuperAdmin(); @endphp
                         <div class="d-flex gap-6 justify-center align-center" style="flex-wrap: wrap;">
-                            {{-- Tombol Ubah Password --}}
-                            <button type="button" class="btn btn-outline btn-sm" 
-                                    onclick="openChangePasswordModal('{{ $user->id }}', '{{ addslashes($user->name) }}')"
-                                    title="Ubah Password Pengguna"
-                                    style="border-color: rgba(255,179,0,0.3); color: #ffb300;">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-                                Password
-                            </button>
-
-                            {{-- Tombol Edit Profil/Hak Akses --}}
-                            <a href="{{ route('users.edit', $user->id) }}" class="btn btn-outline btn-sm" title="Edit Data & Hak Akses">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                                Edit
-                            </a>
-
-                            {{-- Tombol Akses Router (Khusus Teknisi) --}}
-                            @if($user->isTeknisi())
-                            <a href="{{ route('users.router-assignments', $user) }}" class="btn btn-outline btn-sm" title="Atur Akses Router">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-                                Router
-                            </a>
-                            @endif
-
-                            {{-- Tombol Hapus (Jika bukan diri sendiri) --}}
-                            @if($user->id !== auth()->id())
-                            <form action="{{ route('users.destroy', $user->id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Apakah Anda yakin ingin menghapus pengguna {{ addslashes($user->name) }}?')">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn btn-outline btn-sm" title="Hapus Pengguna" style="color: #ff5252; border-color: rgba(255,82,82,0.2);">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                            @if($canManageTarget)
+                                @can('edit users')
+                                {{-- Tombol Ubah Password --}}
+                                <button type="button" class="btn btn-outline btn-sm" 
+                                        onclick="openChangePasswordModal('{{ $user->id }}', '{{ addslashes($user->name) }}')"
+                                        title="Ubah Password Pengguna"
+                                        style="border-color: rgba(255,179,0,0.3); color: #ffb300;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                                    Password
                                 </button>
-                            </form>
+
+                                {{-- Tombol Edit Profil/Hak Akses --}}
+                                <a href="{{ route('users.edit', $user->id) }}" class="btn btn-outline btn-sm" title="Edit Data & Hak Akses">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                    Edit
+                                </a>
+                                @endcan
+
+                                {{-- Tombol Akses Router (Khusus Teknisi) --}}
+                                @can('manage user router assignments')
+                                @if($user->isTeknisi())
+                                <a href="{{ route('users.router-assignments', $user) }}" class="btn btn-outline btn-sm" title="Atur Akses Router">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                                    Router
+                                </a>
+                                @endif
+                                @endcan
+
+                                {{-- Tombol Hapus (Jika punya izin delete users dan bukan diri sendiri) --}}
+                                @can('delete users')
+                                @if($user->id !== auth()->id())
+                                <form action="{{ route('users.destroy', $user->id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Apakah Anda yakin ingin menghapus pengguna {{ addslashes($user->name) }}?')">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-outline btn-sm" title="Hapus Pengguna" style="color: #ff5252; border-color: rgba(255,82,82,0.2);">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </form>
+                                @endif
+                                @endcan
+                            @else
+                                <span class="text-muted" style="font-size:12px;">Terproteksi</span>
                             @endif
                         </div>
                     </td>

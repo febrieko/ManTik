@@ -43,11 +43,12 @@ class PublicVoucherCheckoutTest extends TestCase
             '*' => Http::response(['status' => 'sent'], 200),
         ]);
 
-        Permission::firstOrCreate(['name' => 'view billing']);
-        Permission::firstOrCreate(['name' => 'view dashboard']);
+        foreach (['view billing', 'edit billing', 'view dashboard'] as $perm) {
+            Permission::firstOrCreate(['name' => $perm]);
+        }
 
         $adminRole = Role::firstOrCreate(['name' => 'admin']);
-        $adminRole->givePermissionTo(['view billing', 'view dashboard']);
+        $adminRole->givePermissionTo(['view billing', 'edit billing', 'view dashboard']);
 
         $this->adminUser = User::create([
             'name'      => 'Admin Public Orders',

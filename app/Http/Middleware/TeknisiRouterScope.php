@@ -24,13 +24,17 @@ class TeknisiRouterScope
 
         // Teknisi: validasi akses ke router
         if ($user->isTeknisi()) {
-            // Cari router_id dari request (parameter route atau query string)
-            $routerId = $request->route('router')?->id
-                     ?? $request->route('pppoe')?->router_id
-                     ?? $request->route('hotspot')?->router_id
-                     ?? $request->input('router_id');
+            $routeRouter = $request->route('router');
+            $routerId = is_object($routeRouter) ? $routeRouter->id : (is_numeric($routeRouter) ? (int) $routeRouter : null);
 
-            if ($routerId && !$user->canAccessRouter($routerId)) {
+            $routerId = $routerId
+                ?? $request->route('pppoe')?->router_id
+                ?? $request->route('pppoeUser')?->router_id
+                ?? $request->route('hotspot')?->router_id
+                ?? $request->route('queue')?->router_id
+                ?? ($request->filled('router_id') ? (int) $request->input('router_id') : null);
+
+            if ($routerId && !$user->canAccessRouter((int) $routerId)) {
                 abort(403, 'Anda tidak memiliki akses ke router ini.');
             }
         }

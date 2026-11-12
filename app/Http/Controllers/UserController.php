@@ -11,11 +11,60 @@ use Spatie\Permission\Models\Role;
 class UserController extends Controller
 {
     /**
-     * Display a listing of users.
+     * Daftar role staff yang boleh dipilih oleh pengguna yang sedang login.
+     * Non-super-admin tidak diizinkan membuat atau mengangkat user menjadi super-admin.
+     */
+    protected function availableRolesForActor(): array
+    {
+        $allRoles = [
+            'super-admin' => [
+                'name'        => 'Super Admin',
+                'description' => 'Akses penuh ke seluruh sistem, pengaturan, backup, dan manajemen pengguna.',
+                'badge'       => 'badge-danger',
+                'color'       => '#ff4444',
+            ],
+            'admin' => [
+                'name'        => 'Administrator',
+                'description' => 'Akses manajemen router, PPPoE, Hotspot, billing, laporan, dan pelanggan.',
+                'badge'       => 'badge-info',
+                'color'       => '#00d4ff',
+            ],
+            'teknisi' => [
+                'name'        => 'Teknisi',
+                'description' => 'Akses operasional router, monitoring lalu lintas, status perangkat, dan troubleshooting.',
+                'badge'       => 'badge-warning',
+                'color'       => '#ffb300',
+            ],
+        ];
+
+        if (!auth()->user()?->isSuperAdmin()) {
+            unset($allRoles['super-admin']);
+        }
+
+        return $allRoles;
+    }
+
+    /**
+     * Pastikan hanya Super Admin yang boleh mengelola akun Super Admin lain.
+     */
+    protected function ensureCanManageTarget(User $target): void
+    {
+        if ($target->isSuperAdmin() && !auth()->user()?->isSuperAdmin()) {
+            abort(403, 'Hanya Super Admin yang dapat mengelola akun Super Admin.');
+        }
+
+        if ($target->isCustomer() && !$target->hasAnyRole(['super-admin', 'admin', 'teknisi'])) {
+            abort(403, 'Akun Portal Pelanggan dikelola melalui modul Manajemen Pelanggan.');
+        }
+    }
+
+    /**
+     * Display a listing of staff users.
      */
     public function index(Request $request)
     {
-        $query = User::with('roles');
+        $query = User::with('roles')
+            ->whereDoesntHave('roles', fn ($q) => $q->where('name', 'customer'));
 
         if ($request->filled('search')) {
             $search = $request->search;
@@ -31,7 +80,7 @@ class UserController extends Controller
         }
 
         $users = $query->latest()->paginate(15)->withQueryString();
-        $roles = Role::whereIn('name', ['super-admin', 'admin', 'teknisi'])->get();
+        $roles = Role::whereIn('name', array_keys($this->availableRolesForActor()))->get();
 
         return view('users.index', compact('users', 'roles'));
     }
@@ -41,27 +90,7 @@ class UserController extends Controller
      */
     public function create()
     {
-        $roles = [
-            'super-admin' => [
-                'name' => 'Super Admin',
-                'description' => 'Akses penuh ke seluruh sistem, pengaturan, backup, dan manajemen pengguna.',
-                'badge' => 'badge-danger',
-                'color' => '#ff4444',
-            ],
-            'admin' => [
-                'name' => 'Administrator',
-                'description' => 'Akses manajemen router, PPPoE, Hotspot, billing, laporan, dan pelanggan.',
-                'badge' => 'badge-info',
-                'color' => '#00d4ff',
-            ],
-            'teknisi' => [
-                'name' => 'Teknisi',
-                'description' => 'Akses operasional router, monitoring lalu lintas, status perangkat, dan troubleshooting.',
-                'badge' => 'badge-warning',
-                'color' => '#ffb300',
-            ],
-        ];
-
+        $roles = $this->availableRolesForActor();
         return view('users.create', compact('roles'));
     }
 
@@ -70,11 +99,13 @@ class UserController extends Controller
      */
     public function store(Request $request)
     {
+        $allowedRoles = array_keys($this->availableRolesForActor());
+
         $validated = $request->validate([
             'name'                  => ['required', 'string', 'max:255'],
             'email'                 => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'password'              => ['required', 'string', 'min:6', 'confirmed'],
-            'role'                  => ['required', Rule::in(['super-admin', 'admin', 'teknisi'])],
+            'role'                  => ['required', Rule::in($allowedRoles)],
             'phone'                 => ['nullable', 'string', 'max:25'],
             'telegram_chat_id'      => ['nullable', 'string', 'max:50'],
             'is_active'             => ['nullable', 'boolean'],
@@ -87,7 +118,7 @@ class UserController extends Controller
             'password.min'          => 'Password minimal harus 6 karakter.',
             'password.confirmed'    => 'Konfirmasi password tidak cocok.',
             'role.required'         => 'Pilihan hak akses / role wajib dipilih.',
-            'role.in'               => 'Role yang dipilih tidak valid.',
+            'role.in'               => 'Anda tidak memiliki izin untuk menetapkan role tersebut.',
         ]);
 
         $user = User::create([
@@ -117,20 +148,9 @@ class UserController extends Controller
     public function edit($id)
     {
         $user = User::with('roles')->findOrFail($id);
-        $roles = [
-            'super-admin' => [
-                'name' => 'Super Admin',
-                'description' => 'Akses penuh ke seluruh sistem, pengaturan, dan manajemen pengguna.',
-            ],
-            'admin' => [
-                'name' => 'Administrator',
-                'description' => 'Akses manajemen router, PPPoE, Hotspot, billing, laporan, dan pelanggan.',
-            ],
-            'teknisi' => [
-                'name' => 'Teknisi',
-                'description' => 'Akses operasional router, monitoring, dan troubleshooting.',
-            ],
-        ];
+        $this->ensureCanManageTarget($user);
+
+        $roles = $this->availableRolesForActor();
 
         return view('users.edit', compact('user', 'roles'));
     }
@@ -140,28 +160,45 @@ class UserController extends Controller
      */
     public function update(Request $request, $id)
     {
-        $user = User::findOrFail($id);
+        $user = User::with('roles')->findOrFail($id);
+        $this->ensureCanManageTarget($user);
+
+        $allowedRoles = array_keys($this->availableRolesForActor());
 
         $validated = $request->validate([
             'name'             => ['required', 'string', 'max:255'],
             'email'            => ['required', 'string', 'email', 'max:255', Rule::unique('users', 'email')->ignore($user->id)],
-            'role'             => ['required', Rule::in(['super-admin', 'admin', 'teknisi'])],
+            'role'             => ['required', Rule::in($allowedRoles)],
             'phone'            => ['nullable', 'string', 'max:25'],
             'telegram_chat_id' => ['nullable', 'string', 'max:50'],
             'is_active'        => ['nullable', 'boolean'],
         ], [
-            'name.required'    => 'Nama pengguna wajib diisi.',
-            'email.required'   => 'Email wajib diisi.',
-            'email.unique'     => 'Email sudah digunakan oleh pengguna lain.',
-            'role.required'    => 'Hak akses wajib dipilih.',
+            'name.required'  => 'Nama pengguna wajib diisi.',
+            'email.required' => 'Email wajib diisi.',
+            'email.unique'   => 'Email sudah digunakan oleh pengguna lain.',
+            'role.required'  => 'Hak akses wajib dipilih.',
+            'role.in'        => 'Anda tidak memiliki izin untuk menetapkan role tersebut.',
         ]);
+
+        $newActive = $request->has('is_active') ? (bool) $request->is_active : false;
+
+        if ($user->id === auth()->id() && !$newActive) {
+            return back()->withErrors(['is_active' => 'Anda tidak dapat menonaktifkan akun Anda sendiri.'])->withInput();
+        }
+
+        if ($user->hasRole('super-admin') && $validated['role'] !== 'super-admin') {
+            $superAdminCount = User::role('super-admin')->count();
+            if ($superAdminCount <= 1) {
+                return back()->withErrors(['role' => 'Tidak dapat menurunkan role satu-satunya Super Admin di sistem.'])->withInput();
+            }
+        }
 
         $user->update([
             'name'             => $validated['name'],
             'email'            => $validated['email'],
             'phone'            => $validated['phone'] ?? null,
             'telegram_chat_id' => $validated['telegram_chat_id'] ?? null,
-            'is_active'        => $request->has('is_active') ? (bool) $request->is_active : false,
+            'is_active'        => $newActive,
         ]);
 
         $user->syncRoles([$validated['role']]);
@@ -174,6 +211,8 @@ class UserController extends Controller
      */
     public function updatePassword(Request $request, User $user)
     {
+        $this->ensureCanManageTarget($user);
+
         $validated = $request->validate([
             'password' => ['required', 'string', 'min:6', 'confirmed'],
         ], [
@@ -227,7 +266,8 @@ class UserController extends Controller
      */
     public function destroy($id)
     {
-        $user = User::findOrFail($id);
+        $user = User::with('roles')->findOrFail($id);
+        $this->ensureCanManageTarget($user);
 
         if ($user->id === auth()->id()) {
             return redirect()->back()->with('error', 'Anda tidak dapat menghapus akun Anda sendiri.');
